@@ -11,13 +11,18 @@ import (
 	"team-taskflow/internal/infrastructure/db"
 	redisinfra "team-taskflow/internal/infrastructure/redis"
 	"team-taskflow/internal/infrastructure/tx"
+	analyticsrepo "team-taskflow/internal/repository/mysql/analytics"
+	commentrepo "team-taskflow/internal/repository/mysql/comment"
 	historyrepo "team-taskflow/internal/repository/mysql/history"
 	taskrepo "team-taskflow/internal/repository/mysql/task"
 	teamrepo "team-taskflow/internal/repository/mysql/team"
 	userrepo "team-taskflow/internal/repository/mysql/user"
 	"team-taskflow/internal/repository/redis/taskcache"
+	"team-taskflow/internal/usecase/analytics_get"
 	"team-taskflow/internal/usecase/auth_login"
 	"team-taskflow/internal/usecase/auth_register"
+	"team-taskflow/internal/usecase/comment_create"
+	"team-taskflow/internal/usecase/comment_list"
 	"team-taskflow/internal/usecase/task_create"
 	"team-taskflow/internal/usecase/task_history_get"
 	"team-taskflow/internal/usecase/task_list"
@@ -81,6 +86,8 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 
 	taskRepository := taskrepo.NewRepository(pool)
 	historyRepository := historyrepo.NewRepository(pool)
+	commentRepository := commentrepo.NewRepository(pool)
+	analyticsRepository := analyticsrepo.NewRepository(pool)
 	taskListCache := taskcache.NewCache(redisClient, cfg.Cache.TaskListTTL)
 
 	// Usecases.
@@ -96,8 +103,12 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 	})
 	taskUpdateUsecase := task_update.New(taskRepository, teamRepository, historyRepository, txManager, taskListCache)
 	taskHistoryUsecase := task_history_get.New(taskRepository, teamRepository, historyRepository)
+	commentCreateUsecase := comment_create.New(taskRepository, teamRepository, commentRepository)
+	commentListUsecase := comment_list.New(taskRepository, teamRepository, commentRepository)
+	analyticsUsecase := analytics_get.New(analyticsRepository)
 
 	// Delivery.
+	analyticsHandler := httpdelivery.NewAnalyticsHandler(analyticsUsecase)
 	router := httpdelivery.NewRouter(httpdelivery.RouterDeps{
 		AuthMiddleware: httpdelivery.NewAuthMiddleware(jwtManager),
 		Register:       httpdelivery.NewRegisterHandler(registerUsecase).Handle,
@@ -109,6 +120,12 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		TaskList:       httpdelivery.NewTaskListHandler(taskListUsecase).Handle,
 		TaskUpdate:     httpdelivery.NewTaskUpdateHandler(taskUpdateUsecase).Handle,
 		TaskHistory:    httpdelivery.NewTaskHistoryHandler(taskHistoryUsecase).Handle,
+		CommentCreate:  httpdelivery.NewCommentCreateHandler(commentCreateUsecase).Handle,
+		CommentList:    httpdelivery.NewCommentListHandler(commentListUsecase).Handle,
+
+		AnalyticsTeamStats:         analyticsHandler.TeamStats,
+		AnalyticsTopCreators:       analyticsHandler.TopCreators,
+		AnalyticsOrphanedAssignees: analyticsHandler.OrphanedAssignees,
 	})
 
 	return &dependencies{

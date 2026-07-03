@@ -19,6 +19,13 @@ type RouterDeps struct {
 	TaskList    http.HandlerFunc
 	TaskUpdate  http.HandlerFunc
 	TaskHistory http.HandlerFunc
+
+	CommentCreate http.HandlerFunc
+	CommentList   http.HandlerFunc
+
+	AnalyticsTeamStats         http.HandlerFunc
+	AnalyticsTopCreators       http.HandlerFunc
+	AnalyticsOrphanedAssignees http.HandlerFunc
 }
 
 // NewRouter assembles the HTTP routing tree.
@@ -42,6 +49,13 @@ func NewRouter(deps RouterDeps) http.Handler {
 			protected.Get("/tasks", deps.TaskList)
 			protected.Put("/tasks/{id}", deps.TaskUpdate)
 			protected.Get("/tasks/{id}/history", deps.TaskHistory)
+
+			protected.Post("/tasks/{id}/comments", deps.CommentCreate)
+			protected.Get("/tasks/{id}/comments", deps.CommentList)
+
+			protected.Get("/analytics/team-stats", deps.AnalyticsTeamStats)
+			protected.Get("/analytics/top-creators", deps.AnalyticsTopCreators)
+			protected.Get("/analytics/integrity/orphaned-assignees", deps.AnalyticsOrphanedAssignees)
 		})
 	})
 
