@@ -1,0 +1,48 @@
+http:
+  addr: ":8080"
+  read_timeout: 10s
+  write_timeout: 15s
+  shutdown_timeout: 10s
+
+mysql:
+  host: "127.0.0.1"
+  port: 3306
+  user: "taskflow"
+  password: "taskflow"
+  database: "taskflow"
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime: 5m
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+auth:
+  jwt_secret: "local-dev-secret-change-me"
+  token_ttl: 24h
+  bcrypt_cost: 10
+
+cache:
+  task_list_ttl: 5m
+
+rate_limit:
+  enabled: true
+  requests: 100
+  window: 1m
+
+email:
+  base_url: "http://email-service.local:8081"
+  request_timeout: 2s
+  breaker_max_requests: 1
+  breaker_interval: 60s
+  breaker_timeout: 30s
+  breaker_max_failures: 3
+
+pagination:
+  default_page_size: 20
+  max_page_size: 100
+
+log:
+  level: "info"
