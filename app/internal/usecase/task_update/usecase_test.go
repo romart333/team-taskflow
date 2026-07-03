@@ -2,6 +2,7 @@ package task_update
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -156,5 +157,52 @@ func TestUsecase_Handle(t *testing.T) {
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, AssigneeID: &outsider})
 
 		require.ErrorIs(t, err, domain.ErrValidation)
+	})
+}
+
+func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
+	baseTask := domain.Task{ID: 7, TeamID: 1, Title: "Old", Status: domain.TaskStatusTodo}
+	dbErr := errors.New("db down")
+
+	t.Run("membership check failure", func(t *testing.T) {
+		teams := &teamRepoMock{errs: map[int64]error{5: dbErr}}
+		uc := New(&taskRepoMock{task: baseTask}, teams, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		require.Error(t, err)
+		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
+	})
+
+	t.Run("assignee check failure", func(t *testing.T) {
+		outsider := int64(99)
+		teams := &teamRepoMock{errs: map[int64]error{99: dbErr}}
+		uc := New(&taskRepoMock{task: baseTask}, teams, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, AssigneeID: &outsider})
+		require.Error(t, err)
+		require.NotErrorIs(t, err, domain.ErrValidation)
+	})
+
+	t.Run("update failure rolls back", func(t *testing.T) {
+		tasks := &taskRepoMock{task: baseTask, updateErr: dbErr}
+		history := &historyRepoMock{}
+		uc := New(tasks, &teamRepoMock{}, history, &txMock{}, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		require.Error(t, err)
+		assert.Empty(t, history.entries)
+	})
+
+	t.Run("history write failure", func(t *testing.T) {
+		uc := New(&taskRepoMock{task: baseTask}, &teamRepoMock{}, &historyRepoMock{err: dbErr}, &txMock{}, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		require.Error(t, err)
+	})
+
+	t.Run("description change is audited", func(t *testing.T) {
+		history := &historyRepoMock{}
+		uc := New(&taskRepoMock{task: baseTask}, &teamRepoMock{}, history, &txMock{}, &invalidatorMock{})
+		out, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Description: new("new desc")})
+		require.NoError(t, err)
+		assert.Equal(t, "new desc", out.Task.Description)
+		require.Len(t, history.entries, 1)
+		assert.Equal(t, domain.TaskFieldDescription, history.entries[0].Field)
 	})
 }

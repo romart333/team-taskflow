@@ -127,3 +127,36 @@ func TestUsecase_Handle(t *testing.T) {
 		})
 	}
 }
+
+func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
+	dbErr := errors.New("db down")
+	assignee := int64(9)
+
+	t.Run("membership check failure", func(t *testing.T) {
+		teams := &teamRepoMock{errs: map[int64]error{5: dbErr}}
+		uc := New(&taskRepoMock{}, teams, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
+		require.Error(t, err)
+		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
+	})
+
+	t.Run("assignee check failure", func(t *testing.T) {
+		teams := &teamRepoMock{errs: map[int64]error{9: dbErr}}
+		uc := New(&taskRepoMock{}, teams, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t", AssigneeID: &assignee})
+		require.Error(t, err)
+		require.NotErrorIs(t, err, domain.ErrValidation)
+	})
+
+	t.Run("create failure", func(t *testing.T) {
+		uc := New(&taskRepoMock{createErr: dbErr}, &teamRepoMock{}, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
+		require.Error(t, err)
+	})
+
+	t.Run("reload failure", func(t *testing.T) {
+		uc := New(&taskRepoMock{createID: 1, getErr: dbErr}, &teamRepoMock{}, &invalidatorMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
+		require.Error(t, err)
+	})
+}

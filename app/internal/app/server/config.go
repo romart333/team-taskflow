@@ -67,12 +67,12 @@ type RateLimitConfig struct {
 }
 
 type EmailConfig struct {
-	BaseURL             string        `yaml:"base_url" env:"EMAIL_BASE_URL"`
-	RequestTimeout      time.Duration `yaml:"request_timeout" env:"EMAIL_REQUEST_TIMEOUT"`
-	BreakerMaxRequests  uint32        `yaml:"breaker_max_requests" env:"EMAIL_BREAKER_MAX_REQUESTS"`
-	BreakerInterval     time.Duration `yaml:"breaker_interval" env:"EMAIL_BREAKER_INTERVAL"`
-	BreakerTimeout      time.Duration `yaml:"breaker_timeout" env:"EMAIL_BREAKER_TIMEOUT"`
-	BreakerMaxFailures  uint32        `yaml:"breaker_max_failures" env:"EMAIL_BREAKER_MAX_FAILURES"`
+	BaseURL            string        `yaml:"base_url" env:"EMAIL_BASE_URL"`
+	RequestTimeout     time.Duration `yaml:"request_timeout" env:"EMAIL_REQUEST_TIMEOUT"`
+	BreakerMaxRequests uint32        `yaml:"breaker_max_requests" env:"EMAIL_BREAKER_MAX_REQUESTS"`
+	BreakerInterval    time.Duration `yaml:"breaker_interval" env:"EMAIL_BREAKER_INTERVAL"`
+	BreakerTimeout     time.Duration `yaml:"breaker_timeout" env:"EMAIL_BREAKER_TIMEOUT"`
+	BreakerMaxFailures uint32        `yaml:"breaker_max_failures" env:"EMAIL_BREAKER_MAX_FAILURES"`
 }
 
 type PaginationConfig struct {

@@ -2,6 +2,7 @@ package task_history_get
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,5 +65,30 @@ func TestUsecase_Handle(t *testing.T) {
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
 		require.ErrorIs(t, err, domain.ErrPermissionDenied)
+	})
+}
+
+func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
+	task := domain.Task{ID: 7, TeamID: 1}
+	dbErr := errors.New("db down")
+
+	t.Run("task load failure", func(t *testing.T) {
+		uc := New(&taskRepoMock{err: dbErr}, &teamRepoMock{}, &historyRepoMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
+		require.Error(t, err)
+		require.NotErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("membership load failure", func(t *testing.T) {
+		uc := New(&taskRepoMock{task: task}, &teamRepoMock{err: dbErr}, &historyRepoMock{})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
+		require.Error(t, err)
+		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
+	})
+
+	t.Run("history load failure", func(t *testing.T) {
+		uc := New(&taskRepoMock{task: task}, &teamRepoMock{}, &historyRepoMock{err: dbErr})
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
+		require.Error(t, err)
 	})
 }
