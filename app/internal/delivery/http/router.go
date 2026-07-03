@@ -10,11 +10,15 @@ import (
 type RouterDeps struct {
 	AuthMiddleware func(http.Handler) http.Handler
 
-	Register   http.HandlerFunc
-	Login      http.HandlerFunc
-	TeamCreate http.HandlerFunc
-	TeamList   http.HandlerFunc
-	TeamInvite http.HandlerFunc
+	Register    http.HandlerFunc
+	Login       http.HandlerFunc
+	TeamCreate  http.HandlerFunc
+	TeamList    http.HandlerFunc
+	TeamInvite  http.HandlerFunc
+	TaskCreate  http.HandlerFunc
+	TaskList    http.HandlerFunc
+	TaskUpdate  http.HandlerFunc
+	TaskHistory http.HandlerFunc
 }
 
 // NewRouter assembles the HTTP routing tree.
@@ -33,6 +37,11 @@ func NewRouter(deps RouterDeps) http.Handler {
 			protected.Post("/teams", deps.TeamCreate)
 			protected.Get("/teams", deps.TeamList)
 			protected.Post("/teams/{id}/invite", deps.TeamInvite)
+
+			protected.Post("/tasks", deps.TaskCreate)
+			protected.Get("/tasks", deps.TaskList)
+			protected.Put("/tasks/{id}", deps.TaskUpdate)
+			protected.Get("/tasks/{id}/history", deps.TaskHistory)
 		})
 	})
 

@@ -11,10 +11,17 @@ import (
 	"team-taskflow/internal/infrastructure/db"
 	redisinfra "team-taskflow/internal/infrastructure/redis"
 	"team-taskflow/internal/infrastructure/tx"
+	historyrepo "team-taskflow/internal/repository/mysql/history"
+	taskrepo "team-taskflow/internal/repository/mysql/task"
 	teamrepo "team-taskflow/internal/repository/mysql/team"
 	userrepo "team-taskflow/internal/repository/mysql/user"
+	"team-taskflow/internal/repository/redis/taskcache"
 	"team-taskflow/internal/usecase/auth_login"
 	"team-taskflow/internal/usecase/auth_register"
+	"team-taskflow/internal/usecase/task_create"
+	"team-taskflow/internal/usecase/task_history_get"
+	"team-taskflow/internal/usecase/task_list"
+	"team-taskflow/internal/usecase/task_update"
 	"team-taskflow/internal/usecase/team_create"
 	"team-taskflow/internal/usecase/team_invite"
 	"team-taskflow/internal/usecase/team_list"
@@ -72,12 +79,23 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		MaxFailures:    cfg.Email.BreakerMaxFailures,
 	})
 
+	taskRepository := taskrepo.NewRepository(pool)
+	historyRepository := historyrepo.NewRepository(pool)
+	taskListCache := taskcache.NewCache(redisClient, cfg.Cache.TaskListTTL)
+
 	// Usecases.
 	registerUsecase := auth_register.New(userRepository, passwordHasher)
 	loginUsecase := auth_login.New(userRepository, passwordHasher, jwtManager)
 	teamCreateUsecase := team_create.New(teamRepository, txManager)
 	teamListUsecase := team_list.New(teamRepository)
 	teamInviteUsecase := team_invite.New(teamRepository, userRepository, emailClient)
+	taskCreateUsecase := task_create.New(taskRepository, teamRepository, taskListCache)
+	taskListUsecase := task_list.New(taskRepository, teamRepository, taskListCache, task_list.Pagination{
+		DefaultPageSize: cfg.Pagination.DefaultPageSize,
+		MaxPageSize:     cfg.Pagination.MaxPageSize,
+	})
+	taskUpdateUsecase := task_update.New(taskRepository, teamRepository, historyRepository, txManager, taskListCache)
+	taskHistoryUsecase := task_history_get.New(taskRepository, teamRepository, historyRepository)
 
 	// Delivery.
 	router := httpdelivery.NewRouter(httpdelivery.RouterDeps{
@@ -87,6 +105,10 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		TeamCreate:     httpdelivery.NewTeamCreateHandler(teamCreateUsecase).Handle,
 		TeamList:       httpdelivery.NewTeamListHandler(teamListUsecase).Handle,
 		TeamInvite:     httpdelivery.NewTeamInviteHandler(teamInviteUsecase).Handle,
+		TaskCreate:     httpdelivery.NewTaskCreateHandler(taskCreateUsecase).Handle,
+		TaskList:       httpdelivery.NewTaskListHandler(taskListUsecase).Handle,
+		TaskUpdate:     httpdelivery.NewTaskUpdateHandler(taskUpdateUsecase).Handle,
+		TaskHistory:    httpdelivery.NewTaskHistoryHandler(taskHistoryUsecase).Handle,
 	})
 
 	return &dependencies{
