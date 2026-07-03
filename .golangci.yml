@@ -5,6 +5,13 @@ linters:
   settings:
     staticcheck:
       checks: ["all", "-ST1000"]
+  exclusions:
+    rules:
+      # Project convention (one operation = one package): usecase packages are
+      # named after the operation, e.g. task_create.
+      - path: internal/usecase/
+        linters: [staticcheck]
+        text: "ST1003"
 
 issues:
   max-issues-per-linter: 0

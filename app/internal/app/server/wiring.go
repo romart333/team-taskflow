@@ -6,9 +6,13 @@ import (
 	"net/http"
 
 	httpdelivery "team-taskflow/internal/delivery/http"
+	"team-taskflow/internal/infrastructure/auth"
 	"team-taskflow/internal/infrastructure/db"
 	redisinfra "team-taskflow/internal/infrastructure/redis"
 	"team-taskflow/internal/infrastructure/tx"
+	userrepo "team-taskflow/internal/repository/mysql/user"
+	"team-taskflow/internal/usecase/auth_login"
+	"team-taskflow/internal/usecase/auth_register"
 )
 
 // dependencies holds everything App needs from the composition root.
@@ -46,8 +50,24 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 	txManager := tx.NewManager(pool)
 	_ = txManager // wired into usecases in later batches
 
+	passwordHasher, err := auth.NewPasswordHasher(cfg.Auth.BcryptCost)
+	if err != nil {
+		return nil, fmt.Errorf("creating password hasher: %w", err)
+	}
+	jwtManager := auth.NewJWTManager(cfg.Auth.JWTSecret, cfg.Auth.TokenTTL)
+
+	// Driven adapters.
+	userRepository := userrepo.NewRepository(pool)
+
+	// Usecases.
+	registerUsecase := auth_register.New(userRepository, passwordHasher)
+	loginUsecase := auth_login.New(userRepository, passwordHasher, jwtManager)
+
 	// Delivery.
-	router := httpdelivery.NewRouter(httpdelivery.RouterDeps{})
+	router := httpdelivery.NewRouter(httpdelivery.RouterDeps{
+		Register: httpdelivery.NewRegisterHandler(registerUsecase).Handle,
+		Login:    httpdelivery.NewLoginHandler(loginUsecase).Handle,
+	})
 
 	return &dependencies{
 		handler: router,
