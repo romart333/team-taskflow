@@ -146,6 +146,28 @@ func TestTaskRepositoryListFilters(t *testing.T) {
 	assert.Len(t, paged.Tasks, 1, "second page holds the remainder")
 }
 
+func TestTaskRepositoryUpdate(t *testing.T) {
+	ctx := context.Background()
+	tasks := taskrepo.NewRepository(pool)
+
+	authorID := createUser(t, "Updater")
+	teamID := createTeamWithOwner(t, "Updates", authorID)
+	taskID, err := tasks.Create(ctx, domain.Task{
+		TeamID: teamID, Title: "t", Description: "d",
+		Status: domain.TaskStatusTodo, CreatedBy: authorID,
+	})
+	require.NoError(t, err)
+
+	task, err := tasks.GetByID(ctx, taskID)
+	require.NoError(t, err)
+
+	require.NoError(t, tasks.Update(ctx, task), "no-op update must succeed")
+
+	task.ID = taskID + 1_000_000
+	err = tasks.Update(ctx, task)
+	require.ErrorIs(t, err, domain.ErrNotFound, "updating a missing task must report not found")
+}
+
 func TestHistoryAndCommentsRepositories(t *testing.T) {
 	ctx := context.Background()
 	tasks := taskrepo.NewRepository(pool)
@@ -208,4 +230,17 @@ func TestTxManagerRollback(t *testing.T) {
 
 	_, err = users.GetByEmail(ctx, email)
 	require.NoError(t, err, "committed insert must be visible")
+}
+
+func TestTxManagerPanicReleasesConnection(t *testing.T) {
+	ctx := context.Background()
+	manager := tx.NewManager(pool)
+
+	require.Panics(t, func() {
+		_ = manager.Do(ctx, func(context.Context) error {
+			panic("boom")
+		})
+	})
+
+	assert.Zero(t, pool.Stats().InUse, "transaction connection must be released after a panic")
 }

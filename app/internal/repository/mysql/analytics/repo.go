@@ -1,6 +1,5 @@
-// Package analyticsrepo implements the reporting queries required by the
-// spec: multi-join aggregation, a window-function ranking and a correlated
-// integrity audit.
+// Package analyticsrepo implements the reporting reads: team stats, top
+// task creators and the assignee integrity audit.
 package analyticsrepo
 
 import (
@@ -20,7 +19,6 @@ func NewRepository(pool *sql.DB) *Repository {
 }
 
 // TeamStats reports, per team, the name, member count and tasks done within the window.
-// (JOIN across teams, team_members and tasks + aggregation.)
 func (r *Repository) TeamStats(ctx context.Context, doneWindowDays int) ([]domain.TeamStats, error) {
 	rows, err := r.pool.QueryContext(ctx, `
 		SELECT t.id,
@@ -45,7 +43,7 @@ func (r *Repository) TeamStats(ctx context.Context, doneWindowDays int) ([]domai
 	var stats []domain.TeamStats
 	for rows.Next() {
 		var s domain.TeamStats
-		if err := rows.Scan(&s.TeamID, &s.TeamName, &s.MemberCount, &s.DoneTasksLast7Days); err != nil {
+		if err := rows.Scan(&s.TeamID, &s.TeamName, &s.MemberCount, &s.DoneTasksInWindow); err != nil {
 			return nil, fmt.Errorf("scanning team stats row: %w", err)
 		}
 		stats = append(stats, s)
@@ -56,8 +54,8 @@ func (r *Repository) TeamStats(ctx context.Context, doneWindowDays int) ([]domai
 	return stats, nil
 }
 
-// TopCreators returns the top-N task creators per team within the window, ranked with
-// a window function.
+// TopCreators returns the top-N task creators per team within the window.
+// Ties are broken by user ID to keep the ranking deterministic.
 func (r *Repository) TopCreators(ctx context.Context, windowDays, limit int) ([]domain.TeamTopCreator, error) {
 	rows, err := r.pool.QueryContext(ctx, `
 		SELECT team_id, team_name, user_id, user_name, created_count, rnk
@@ -100,8 +98,8 @@ func (r *Repository) TopCreators(ctx context.Context, windowDays, limit int) ([]
 	return creators, nil
 }
 
-// OrphanedAssignees returns tasks whose assignee is not a member of the task's team
-// (correlated NOT EXISTS against team_members).
+// OrphanedAssignees returns tasks whose assignee is not a member of the
+// task's team, so integrity violations surface before they confuse users.
 func (r *Repository) OrphanedAssignees(ctx context.Context) ([]domain.OrphanedAssigneeTask, error) {
 	rows, err := r.pool.QueryContext(ctx, `
 		SELECT ta.id, ta.title, ta.team_id, ta.assignee_id

@@ -60,7 +60,7 @@ func TestAnalyticsQueries(t *testing.T) {
 		}
 		require.NotNil(t, found, "team must be present in stats")
 		assert.EqualValues(t, 2, found.MemberCount)
-		assert.EqualValues(t, 1, found.DoneTasksLast7Days)
+		assert.EqualValues(t, 1, found.DoneTasksInWindow)
 	})
 
 	t.Run("top creators ranks by created count", func(t *testing.T) {

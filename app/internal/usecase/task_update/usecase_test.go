@@ -3,6 +3,7 @@ package task_update
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -127,6 +128,21 @@ func TestUsecase_Handle(t *testing.T) {
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
 		require.ErrorIs(t, err, domain.ErrNotFound)
+	})
+
+	t.Run("task deleted concurrently during update maps to client-visible not found", func(t *testing.T) {
+		tasks := &taskRepoMock{
+			task:      baseTask,
+			updateErr: fmt.Errorf("no task with id=7: %w", domain.ErrNotFound),
+		}
+		uc := New(tasks, &teamRepoMock{}, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
+
+		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("New title")})
+
+		require.ErrorIs(t, err, domain.ErrNotFound)
+		var safeErr *domain.SafeError
+		require.ErrorAs(t, err, &safeErr, "race must surface as a client-visible not-found error")
+		assert.Equal(t, "task not found", safeErr.Msg)
 	})
 
 	t.Run("non-member is rejected", func(t *testing.T) {

@@ -6,7 +6,7 @@ CREATE TABLE users (
     created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_users_email (email)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE teams (
     id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -14,7 +14,7 @@ CREATE TABLE teams (
     created_by BIGINT UNSIGNED NOT NULL,
     created_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_teams_created_by FOREIGN KEY (created_by) REFERENCES users (id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE team_members (
     team_id   BIGINT UNSIGNED NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE team_members (
     KEY idx_team_members_user (user_id),
     CONSTRAINT fk_tm_team FOREIGN KEY (team_id) REFERENCES teams (id),
     CONSTRAINT fk_tm_user FOREIGN KEY (user_id) REFERENCES users (id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE tasks (
     id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -44,7 +44,7 @@ CREATE TABLE tasks (
     CONSTRAINT fk_tasks_team FOREIGN KEY (team_id) REFERENCES teams (id),
     CONSTRAINT fk_tasks_assignee FOREIGN KEY (assignee_id) REFERENCES users (id),
     CONSTRAINT fk_tasks_created_by FOREIGN KEY (created_by) REFERENCES users (id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE task_history (
     id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -57,7 +57,7 @@ CREATE TABLE task_history (
     KEY idx_task_history_task (task_id, changed_at),
     CONSTRAINT fk_th_task FOREIGN KEY (task_id) REFERENCES tasks (id),
     CONSTRAINT fk_th_user FOREIGN KEY (changed_by) REFERENCES users (id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE task_comments (
     id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -68,4 +68,4 @@ CREATE TABLE task_comments (
     KEY idx_task_comments_task (task_id, created_at),
     CONSTRAINT fk_tc_task FOREIGN KEY (task_id) REFERENCES tasks (id),
     CONSTRAINT fk_tc_user FOREIGN KEY (user_id) REFERENCES users (id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

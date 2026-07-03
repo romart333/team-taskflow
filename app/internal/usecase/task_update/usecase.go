@@ -58,6 +58,10 @@ func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
 
 	err = u.tx.Do(ctx, func(txCtx context.Context) error {
 		if err := u.tasks.Update(txCtx, updated); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				// The task was deleted between the read above and this write.
+				return fmt.Errorf("updating task: %w", domain.NewNotFoundError("task not found"))
+			}
 			return fmt.Errorf("updating task: %w", err)
 		}
 

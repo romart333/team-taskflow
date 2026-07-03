@@ -14,10 +14,10 @@ type analyticsUsecase interface {
 }
 
 type teamStatsItem struct {
-	TeamID             int64  `json:"team_id"`
-	TeamName           string `json:"team_name"`
-	MemberCount        int64  `json:"member_count"`
-	DoneTasksLast7Days int64  `json:"done_tasks_last_7_days"`
+	TeamID            int64  `json:"team_id"`
+	TeamName          string `json:"team_name"`
+	MemberCount       int64  `json:"member_count"`
+	DoneTasksInWindow int64  `json:"done_tasks_in_window"`
 }
 
 type teamStatsResponse struct {
@@ -68,10 +68,10 @@ func (h *AnalyticsHandler) TeamStats(w http.ResponseWriter, r *http.Request) {
 	items := make([]teamStatsItem, 0, len(stats))
 	for _, s := range stats {
 		items = append(items, teamStatsItem{
-			TeamID:             s.TeamID,
-			TeamName:           s.TeamName,
-			MemberCount:        s.MemberCount,
-			DoneTasksLast7Days: s.DoneTasksLast7Days,
+			TeamID:            s.TeamID,
+			TeamName:          s.TeamName,
+			MemberCount:       s.MemberCount,
+			DoneTasksInWindow: s.DoneTasksInWindow,
 		})
 	}
 	respondJSON(ctx, w, http.StatusOK, teamStatsResponse{Teams: items})

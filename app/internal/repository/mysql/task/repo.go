@@ -69,8 +69,14 @@ func (r *Repository) Update(ctx context.Context, task domain.Task) error {
 		return fmt.Errorf("updating task id=%d: %w", task.ID, err)
 	}
 
-	if _, err := result.RowsAffected(); err != nil {
+	// The pool runs with CLIENT_FOUND_ROWS, so RowsAffected counts matched
+	// rows and 0 unambiguously means the task does not exist.
+	rows, err := result.RowsAffected()
+	if err != nil {
 		return fmt.Errorf("reading update result: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("no task with id=%d: %w", task.ID, domain.ErrNotFound)
 	}
 	return nil
 }

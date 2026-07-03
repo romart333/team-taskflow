@@ -64,7 +64,7 @@ func run(m *testing.M) (int, error) {
 	}
 	defer func() { _ = pool.Close() }()
 
-	if err := db.Migrate(pool, "taskflow_test"); err != nil {
+	if err := db.Migrate(ctx, pool, "taskflow_test"); err != nil {
 		return 1, fmt.Errorf("migrating: %w", err)
 	}
 

@@ -6,6 +6,7 @@ package tx
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -29,7 +30,7 @@ func NewManager(pool *sql.DB) *Manager {
 
 // Do runs fn inside a transaction. A nested Do reuses the transaction already
 // present in ctx, so inner calls join the outer transaction.
-func (m *Manager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+func (m *Manager) Do(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	if txFromContext(ctx) != nil {
 		return fn(ctx)
 	}
@@ -38,12 +39,17 @@ func (m *Manager) Do(ctx context.Context, fn func(ctx context.Context) error) er
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
+	// Deferred rollback releases the connection even when fn panics; after a
+	// finished transaction it reports sql.ErrTxDone, which is expected. Any
+	// real rollback failure is joined into the returned error.
+	defer func() {
+		if rbErr := transaction.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			err = errors.Join(err, fmt.Errorf("rolling back transaction: %w", rbErr))
+		}
+	}()
 
 	txCtx := context.WithValue(ctx, txContextKey{}, transaction)
 	if err := fn(txCtx); err != nil {
-		if rbErr := transaction.Rollback(); rbErr != nil {
-			return fmt.Errorf("rolling back after %w: %w", err, rbErr)
-		}
 		return err
 	}
 

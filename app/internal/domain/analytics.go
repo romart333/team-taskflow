@@ -7,12 +7,13 @@ const (
 	TopCreatorsLimit        = 3
 )
 
-// TeamStats aggregates a team's size and recent throughput.
+// TeamStats aggregates a team's size and recent throughput. The reporting
+// window is parameterized (TeamStatsDoneWindowDays by default).
 type TeamStats struct {
-	TeamID             int64
-	TeamName           string
-	MemberCount        int64
-	DoneTasksLast7Days int64
+	TeamID            int64
+	TeamName          string
+	MemberCount       int64
+	DoneTasksInWindow int64
 }
 
 // TeamTopCreator is one entry of the per-team top task creators report.

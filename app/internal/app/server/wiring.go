@@ -53,7 +53,7 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		return nil, fmt.Errorf("connecting to mysql: %w", err)
 	}
 
-	if err := db.Migrate(pool, cfg.MySQL.Database); err != nil {
+	if err := db.Migrate(ctx, pool, cfg.MySQL.Database); err != nil {
 		return nil, fmt.Errorf("migrating database: %w", err)
 	}
 
