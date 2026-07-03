@@ -5,14 +5,19 @@ import (
 	"fmt"
 	"net/http"
 
+	"team-taskflow/internal/clients/email"
 	httpdelivery "team-taskflow/internal/delivery/http"
 	"team-taskflow/internal/infrastructure/auth"
 	"team-taskflow/internal/infrastructure/db"
 	redisinfra "team-taskflow/internal/infrastructure/redis"
 	"team-taskflow/internal/infrastructure/tx"
+	teamrepo "team-taskflow/internal/repository/mysql/team"
 	userrepo "team-taskflow/internal/repository/mysql/user"
 	"team-taskflow/internal/usecase/auth_login"
 	"team-taskflow/internal/usecase/auth_register"
+	"team-taskflow/internal/usecase/team_create"
+	"team-taskflow/internal/usecase/team_invite"
+	"team-taskflow/internal/usecase/team_list"
 )
 
 // dependencies holds everything App needs from the composition root.
@@ -48,7 +53,6 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 	}
 
 	txManager := tx.NewManager(pool)
-	_ = txManager // wired into usecases in later batches
 
 	passwordHasher, err := auth.NewPasswordHasher(cfg.Auth.BcryptCost)
 	if err != nil {
@@ -58,15 +62,31 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 
 	// Driven adapters.
 	userRepository := userrepo.NewRepository(pool)
+	teamRepository := teamrepo.NewRepository(pool)
+	emailClient := email.NewClient(email.Config{
+		BaseURL:        cfg.Email.BaseURL,
+		RequestTimeout: cfg.Email.RequestTimeout,
+		MaxRequests:    cfg.Email.BreakerMaxRequests,
+		Interval:       cfg.Email.BreakerInterval,
+		Timeout:        cfg.Email.BreakerTimeout,
+		MaxFailures:    cfg.Email.BreakerMaxFailures,
+	})
 
 	// Usecases.
 	registerUsecase := auth_register.New(userRepository, passwordHasher)
 	loginUsecase := auth_login.New(userRepository, passwordHasher, jwtManager)
+	teamCreateUsecase := team_create.New(teamRepository, txManager)
+	teamListUsecase := team_list.New(teamRepository)
+	teamInviteUsecase := team_invite.New(teamRepository, userRepository, emailClient)
 
 	// Delivery.
 	router := httpdelivery.NewRouter(httpdelivery.RouterDeps{
-		Register: httpdelivery.NewRegisterHandler(registerUsecase).Handle,
-		Login:    httpdelivery.NewLoginHandler(loginUsecase).Handle,
+		AuthMiddleware: httpdelivery.NewAuthMiddleware(jwtManager),
+		Register:       httpdelivery.NewRegisterHandler(registerUsecase).Handle,
+		Login:          httpdelivery.NewLoginHandler(loginUsecase).Handle,
+		TeamCreate:     httpdelivery.NewTeamCreateHandler(teamCreateUsecase).Handle,
+		TeamList:       httpdelivery.NewTeamListHandler(teamListUsecase).Handle,
+		TeamInvite:     httpdelivery.NewTeamInviteHandler(teamInviteUsecase).Handle,
 	})
 
 	return &dependencies{

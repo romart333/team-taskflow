@@ -8,8 +8,13 @@ import (
 
 // RouterDeps carries handlers and middleware required to assemble the router.
 type RouterDeps struct {
-	Register http.HandlerFunc
-	Login    http.HandlerFunc
+	AuthMiddleware func(http.Handler) http.Handler
+
+	Register   http.HandlerFunc
+	Login      http.HandlerFunc
+	TeamCreate http.HandlerFunc
+	TeamList   http.HandlerFunc
+	TeamInvite http.HandlerFunc
 }
 
 // NewRouter assembles the HTTP routing tree.
@@ -21,6 +26,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Post("/register", deps.Register)
 		api.Post("/login", deps.Login)
+
+		api.Group(func(protected chi.Router) {
+			protected.Use(deps.AuthMiddleware)
+
+			protected.Post("/teams", deps.TeamCreate)
+			protected.Get("/teams", deps.TeamList)
+			protected.Post("/teams/{id}/invite", deps.TeamInvite)
+		})
 	})
 
 	return r
