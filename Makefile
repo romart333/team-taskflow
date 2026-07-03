@@ -1,7 +1,7 @@
 APP_DIR := app
 BUILD_DIR := build
 
-.PHONY: build run test test-integration lint up down tidy
+.PHONY: build run test test-unit test-integration lint up down tidy
 
 build:
 	cd $(APP_DIR) && go build -o ../$(BUILD_DIR)/server ./cmd/server
@@ -9,7 +9,9 @@ build:
 run:
 	cd $(APP_DIR) && go run ./cmd/server
 
-test: lint
+test: lint test-unit
+
+test-unit:
 	cd $(APP_DIR) && go test ./...
 
 test-integration:
