@@ -15,7 +15,10 @@ jobs:
           go-version-file: app/go.mod
           cache-dependency-path: app/go.sum
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin"
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.4
+          install-only: true
       - name: Lint
         run: make lint
 
