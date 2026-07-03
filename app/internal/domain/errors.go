@@ -11,6 +11,7 @@ var (
 	ErrUnauthorized     = errors.New("unauthorized")
 	ErrValidation       = errors.New("validation failed")
 	ErrConflict         = errors.New("conflict")
+	ErrRateLimited      = errors.New("rate limited")
 )
 
 // SafeError carries a message that is safe to expose to API clients.

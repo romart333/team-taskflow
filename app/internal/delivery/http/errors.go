@@ -41,6 +41,8 @@ func statusFromError(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
 		return http.StatusConflict
+	case errors.Is(err, domain.ErrRateLimited):
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
 	}
@@ -59,7 +61,7 @@ func clientMessage(err error, status int) string {
 
 	for _, sentinel := range []error{
 		domain.ErrValidation, domain.ErrUnauthorized, domain.ErrPermissionDenied,
-		domain.ErrNotFound, domain.ErrAlreadyExists, domain.ErrConflict,
+		domain.ErrNotFound, domain.ErrAlreadyExists, domain.ErrConflict, domain.ErrRateLimited,
 	} {
 		if errors.Is(err, sentinel) {
 			return sentinel.Error()

@@ -9,6 +9,8 @@ import (
 	httpdelivery "team-taskflow/internal/delivery/http"
 	"team-taskflow/internal/infrastructure/auth"
 	"team-taskflow/internal/infrastructure/db"
+	"team-taskflow/internal/infrastructure/metrics"
+	"team-taskflow/internal/infrastructure/ratelimit"
 	redisinfra "team-taskflow/internal/infrastructure/redis"
 	"team-taskflow/internal/infrastructure/tx"
 	analyticsrepo "team-taskflow/internal/repository/mysql/analytics"
@@ -108,9 +110,20 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 	analyticsUsecase := analytics_get.New(analyticsRepository)
 
 	// Delivery.
+	httpMetrics := metrics.NewHTTPMetrics()
+
+	rateLimitMiddleware := passthroughMiddleware
+	if cfg.RateLimit.Enabled {
+		limiter := ratelimit.NewLimiter(redisClient, cfg.RateLimit.Requests, cfg.RateLimit.Window)
+		rateLimitMiddleware = httpdelivery.NewRateLimitMiddleware(limiter)
+	}
+
 	analyticsHandler := httpdelivery.NewAnalyticsHandler(analyticsUsecase)
 	router := httpdelivery.NewRouter(httpdelivery.RouterDeps{
-		AuthMiddleware: httpdelivery.NewAuthMiddleware(jwtManager),
+		AuthMiddleware:      httpdelivery.NewAuthMiddleware(jwtManager),
+		RateLimitMiddleware: rateLimitMiddleware,
+		MetricsMiddleware:   httpdelivery.NewMetricsMiddleware(httpMetrics),
+		MetricsHandler:      httpMetrics.Handler(),
 		Register:       httpdelivery.NewRegisterHandler(registerUsecase).Handle,
 		Login:          httpdelivery.NewLoginHandler(loginUsecase).Handle,
 		TeamCreate:     httpdelivery.NewTeamCreateHandler(teamCreateUsecase).Handle,
@@ -136,3 +149,5 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		},
 	}, nil
 }
+
+func passthroughMiddleware(next http.Handler) http.Handler { return next }

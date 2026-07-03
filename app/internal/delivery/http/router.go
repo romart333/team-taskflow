@@ -8,7 +8,10 @@ import (
 
 // RouterDeps carries handlers and middleware required to assemble the router.
 type RouterDeps struct {
-	AuthMiddleware func(http.Handler) http.Handler
+	AuthMiddleware      func(http.Handler) http.Handler
+	RateLimitMiddleware func(http.Handler) http.Handler
+	MetricsMiddleware   func(http.Handler) http.Handler
+	MetricsHandler      http.Handler
 
 	Register    http.HandlerFunc
 	Login       http.HandlerFunc
@@ -31,15 +34,24 @@ type RouterDeps struct {
 // NewRouter assembles the HTTP routing tree.
 func NewRouter(deps RouterDeps) http.Handler {
 	r := chi.NewRouter()
+	r.Use(deps.MetricsMiddleware)
 
 	r.Get("/healthz", handleHealth)
+	r.Method(http.MethodGet, "/metrics", deps.MetricsHandler)
 
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Post("/register", deps.Register)
-		api.Post("/login", deps.Login)
+		// Public endpoints are rate limited by client IP.
+		api.Group(func(public chi.Router) {
+			public.Use(deps.RateLimitMiddleware)
 
+			public.Post("/register", deps.Register)
+			public.Post("/login", deps.Login)
+		})
+
+		// Protected endpoints are rate limited per authenticated user, so the
+		// limiter runs after authentication.
 		api.Group(func(protected chi.Router) {
-			protected.Use(deps.AuthMiddleware)
+			protected.Use(deps.AuthMiddleware, deps.RateLimitMiddleware)
 
 			protected.Post("/teams", deps.TeamCreate)
 			protected.Get("/teams", deps.TeamList)
