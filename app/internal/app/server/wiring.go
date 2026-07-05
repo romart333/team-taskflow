@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 
+	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
+	"github.com/avito-tech/go-transaction-manager/trm/v2/manager"
+
 	"team-taskflow/internal/clients/email"
 	httpdelivery "team-taskflow/internal/delivery/http"
 	"team-taskflow/internal/infrastructure/auth"
@@ -12,7 +15,6 @@ import (
 	"team-taskflow/internal/infrastructure/metrics"
 	"team-taskflow/internal/infrastructure/ratelimit"
 	redisinfra "team-taskflow/internal/infrastructure/redis"
-	"team-taskflow/internal/infrastructure/tx"
 	analyticsrepo "team-taskflow/internal/repository/mysql/analytics"
 	commentrepo "team-taskflow/internal/repository/mysql/comment"
 	historyrepo "team-taskflow/internal/repository/mysql/history"
@@ -66,7 +68,10 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		return nil, fmt.Errorf("connecting to redis: %w", err)
 	}
 
-	txManager := tx.NewManager(pool)
+	txManager, err := manager.New(trmsql.NewDefaultFactory(pool))
+	if err != nil {
+		return nil, fmt.Errorf("creating transaction manager: %w", err)
+	}
 
 	passwordHasher, err := auth.NewPasswordHasher(cfg.Auth.BcryptCost)
 	if err != nil {

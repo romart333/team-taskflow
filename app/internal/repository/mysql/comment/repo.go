@@ -6,20 +6,22 @@ import (
 	"errors"
 	"fmt"
 
+	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
+
 	"team-taskflow/internal/domain"
-	"team-taskflow/internal/infrastructure/tx"
 )
 
 type Repository struct {
-	pool *sql.DB
+	pool   *sql.DB
+	getter *trmsql.CtxGetter
 }
 
 func NewRepository(pool *sql.DB) *Repository {
-	return &Repository{pool: pool}
+	return &Repository{pool: pool, getter: trmsql.DefaultCtxGetter}
 }
 
 func (r *Repository) Create(ctx context.Context, comment domain.TaskComment) (int64, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	result, err := executor.ExecContext(ctx,
 		`INSERT INTO task_comments (task_id, user_id, body) VALUES (?, ?, ?)`,
@@ -37,7 +39,7 @@ func (r *Repository) Create(ctx context.Context, comment domain.TaskComment) (in
 }
 
 func (r *Repository) GetByID(ctx context.Context, commentID int64) (domain.TaskComment, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	var entity commentEntity
 	err := executor.QueryRowContext(ctx,
@@ -53,7 +55,7 @@ func (r *Repository) GetByID(ctx context.Context, commentID int64) (domain.TaskC
 }
 
 func (r *Repository) ListByTask(ctx context.Context, taskID int64) ([]domain.TaskComment, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	rows, err := executor.QueryContext(ctx,
 		`SELECT id, task_id, user_id, body, created_at

@@ -7,22 +7,24 @@ import (
 	"fmt"
 	"strings"
 
+	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
+
 	"team-taskflow/internal/domain"
-	"team-taskflow/internal/infrastructure/tx"
 )
 
 const taskColumns = "id, team_id, title, description, status, assignee_id, created_by, created_at, updated_at"
 
 type Repository struct {
-	pool *sql.DB
+	pool   *sql.DB
+	getter *trmsql.CtxGetter
 }
 
 func NewRepository(pool *sql.DB) *Repository {
-	return &Repository{pool: pool}
+	return &Repository{pool: pool, getter: trmsql.DefaultCtxGetter}
 }
 
 func (r *Repository) Create(ctx context.Context, task domain.Task) (int64, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	result, err := executor.ExecContext(ctx,
 		`INSERT INTO tasks (team_id, title, description, status, assignee_id, created_by)
@@ -42,7 +44,7 @@ func (r *Repository) Create(ctx context.Context, task domain.Task) (int64, error
 }
 
 func (r *Repository) GetByID(ctx context.Context, taskID int64) (domain.Task, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	var entity taskEntity
 	err := executor.QueryRowContext(ctx,
@@ -59,7 +61,7 @@ func (r *Repository) GetByID(ctx context.Context, taskID int64) (domain.Task, er
 }
 
 func (r *Repository) Update(ctx context.Context, task domain.Task) error {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	result, err := executor.ExecContext(ctx,
 		`UPDATE tasks SET title = ?, description = ?, status = ?, assignee_id = ? WHERE id = ?`,
@@ -84,7 +86,7 @@ func (r *Repository) Update(ctx context.Context, task domain.Task) error {
 // List returns one page of team tasks plus the total count for the filter.
 // Pagination happens in the database via LIMIT/OFFSET.
 func (r *Repository) List(ctx context.Context, filter domain.TaskFilter) (domain.TaskPage, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	where := []string{"team_id = ?"}
 	args := []any{filter.TeamID}

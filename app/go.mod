@@ -3,6 +3,8 @@ module team-taskflow
 go 1.26
 
 require (
+	github.com/avito-tech/go-transaction-manager/drivers/sql/v2 v2.0.4
+	github.com/avito-tech/go-transaction-manager/trm/v2 v2.0.4
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -73,6 +75,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.41.0 // indirect
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
+	go.uber.org/multierr v1.9.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect

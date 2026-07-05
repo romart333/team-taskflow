@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"testing"
 
+	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
+	"github.com/avito-tech/go-transaction-manager/trm/v2/manager"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"team-taskflow/internal/domain"
-	"team-taskflow/internal/infrastructure/tx"
 	commentrepo "team-taskflow/internal/repository/mysql/comment"
 	historyrepo "team-taskflow/internal/repository/mysql/history"
 	taskrepo "team-taskflow/internal/repository/mysql/task"
@@ -205,13 +206,13 @@ func TestHistoryAndCommentsRepositories(t *testing.T) {
 
 func TestTxManagerRollback(t *testing.T) {
 	ctx := context.Background()
-	manager := tx.NewManager(pool)
+	trManager := manager.Must(trmsql.NewDefaultFactory(pool))
 	users := userrepo.NewRepository(pool)
 
 	sentinel := fmt.Errorf("abort")
 	email := "rollback@example.com"
 
-	err := manager.Do(ctx, func(txCtx context.Context) error {
+	err := trManager.Do(ctx, func(txCtx context.Context) error {
 		if _, err := users.Create(txCtx, domain.User{Email: email, Name: "R", PasswordHash: "h"}); err != nil {
 			return err
 		}
@@ -222,7 +223,7 @@ func TestTxManagerRollback(t *testing.T) {
 	_, err = users.GetByEmail(ctx, email)
 	require.ErrorIs(t, err, domain.ErrNotFound, "insert must be rolled back")
 
-	err = manager.Do(ctx, func(txCtx context.Context) error {
+	err = trManager.Do(ctx, func(txCtx context.Context) error {
 		_, err := users.Create(txCtx, domain.User{Email: email, Name: "R", PasswordHash: "h"})
 		return err
 	})
@@ -234,10 +235,10 @@ func TestTxManagerRollback(t *testing.T) {
 
 func TestTxManagerPanicReleasesConnection(t *testing.T) {
 	ctx := context.Background()
-	manager := tx.NewManager(pool)
+	trManager := manager.Must(trmsql.NewDefaultFactory(pool))
 
 	require.Panics(t, func() {
-		_ = manager.Do(ctx, func(context.Context) error {
+		_ = trManager.Do(ctx, func(context.Context) error {
 			panic("boom")
 		})
 	})

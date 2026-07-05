@@ -6,16 +6,18 @@ import (
 	"fmt"
 	"strings"
 
+	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
+
 	"team-taskflow/internal/domain"
-	"team-taskflow/internal/infrastructure/tx"
 )
 
 type Repository struct {
-	pool *sql.DB
+	pool   *sql.DB
+	getter *trmsql.CtxGetter
 }
 
 func NewRepository(pool *sql.DB) *Repository {
-	return &Repository{pool: pool}
+	return &Repository{pool: pool, getter: trmsql.DefaultCtxGetter}
 }
 
 // AddEntries inserts audit entries in one statement. It is called inside the
@@ -24,7 +26,7 @@ func (r *Repository) AddEntries(ctx context.Context, entries []domain.TaskHistor
 	if len(entries) == 0 {
 		return nil
 	}
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	placeholders := make([]string, 0, len(entries))
 	args := make([]any, 0, len(entries)*5)
@@ -45,7 +47,7 @@ func (r *Repository) AddEntries(ctx context.Context, entries []domain.TaskHistor
 }
 
 func (r *Repository) ListByTask(ctx context.Context, taskID int64) ([]domain.TaskHistoryEntry, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	rows, err := executor.QueryContext(ctx,
 		`SELECT id, task_id, changed_by, field, old_value, new_value, changed_at

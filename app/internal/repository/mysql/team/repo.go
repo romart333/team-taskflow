@@ -6,24 +6,25 @@ import (
 	"errors"
 	"fmt"
 
+	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
 	"github.com/go-sql-driver/mysql"
 
 	"team-taskflow/internal/domain"
-	"team-taskflow/internal/infrastructure/tx"
 )
 
 const mysqlErrDuplicateEntry = 1062
 
 type Repository struct {
-	pool *sql.DB
+	pool   *sql.DB
+	getter *trmsql.CtxGetter
 }
 
 func NewRepository(pool *sql.DB) *Repository {
-	return &Repository{pool: pool}
+	return &Repository{pool: pool, getter: trmsql.DefaultCtxGetter}
 }
 
 func (r *Repository) CreateTeam(ctx context.Context, team domain.Team) (int64, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	result, err := executor.ExecContext(ctx,
 		`INSERT INTO teams (name, created_by) VALUES (?, ?)`,
@@ -41,7 +42,7 @@ func (r *Repository) CreateTeam(ctx context.Context, team domain.Team) (int64, e
 }
 
 func (r *Repository) GetTeam(ctx context.Context, teamID int64) (domain.Team, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	var entity teamEntity
 	err := executor.QueryRowContext(ctx,
@@ -57,7 +58,7 @@ func (r *Repository) GetTeam(ctx context.Context, teamID int64) (domain.Team, er
 }
 
 func (r *Repository) AddMember(ctx context.Context, member domain.TeamMember) error {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	_, err := executor.ExecContext(ctx,
 		`INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)`,
@@ -74,7 +75,7 @@ func (r *Repository) AddMember(ctx context.Context, member domain.TeamMember) er
 }
 
 func (r *Repository) GetMember(ctx context.Context, teamID, userID int64) (domain.TeamMember, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	var entity memberEntity
 	err := executor.QueryRowContext(ctx,
@@ -91,7 +92,7 @@ func (r *Repository) GetMember(ctx context.Context, teamID, userID int64) (domai
 }
 
 func (r *Repository) ListByUser(ctx context.Context, userID int64) ([]domain.TeamWithRole, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	rows, err := executor.QueryContext(ctx,
 		`SELECT t.id, t.name, t.created_by, t.created_at, tm.role

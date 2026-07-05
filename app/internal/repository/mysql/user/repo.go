@@ -6,24 +6,25 @@ import (
 	"errors"
 	"fmt"
 
+	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
 	"github.com/go-sql-driver/mysql"
 
 	"team-taskflow/internal/domain"
-	"team-taskflow/internal/infrastructure/tx"
 )
 
 const mysqlErrDuplicateEntry = 1062
 
 type Repository struct {
-	pool *sql.DB
+	pool   *sql.DB
+	getter *trmsql.CtxGetter
 }
 
 func NewRepository(pool *sql.DB) *Repository {
-	return &Repository{pool: pool}
+	return &Repository{pool: pool, getter: trmsql.DefaultCtxGetter}
 }
 
 func (r *Repository) Create(ctx context.Context, user domain.User) (int64, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	result, err := executor.ExecContext(ctx,
 		`INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)`,
@@ -54,7 +55,7 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (domain.User, error)
 }
 
 func (r *Repository) getByField(ctx context.Context, field string, value any) (domain.User, error) {
-	executor := tx.ExecutorFromContext(ctx, r.pool)
+	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	var entity userEntity
 	err := executor.QueryRowContext(ctx,
