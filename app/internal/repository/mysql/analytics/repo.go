@@ -18,8 +18,9 @@ func NewRepository(pool *sql.DB) *Repository {
 	return &Repository{pool: pool}
 }
 
-// TeamStats reports, per team, the name, member count and tasks done within the window.
-func (r *Repository) TeamStats(ctx context.Context, doneWindowDays int) ([]domain.TeamStats, error) {
+// TeamStats reports, per team of the actor, the name, member count and tasks
+// done within the window.
+func (r *Repository) TeamStats(ctx context.Context, actorID int64, doneWindowDays int) ([]domain.TeamStats, error) {
 	rows, err := r.pool.QueryContext(ctx, `
 		SELECT t.id,
 		       t.name,
@@ -31,9 +32,13 @@ func (r *Repository) TeamStats(ctx context.Context, doneWindowDays int) ([]domai
 		FROM teams t
 		LEFT JOIN team_members tm ON tm.team_id = t.id
 		LEFT JOIN tasks ta        ON ta.team_id = t.id
+		WHERE EXISTS (
+		    SELECT 1 FROM team_members am
+		    WHERE am.team_id = t.id AND am.user_id = ?
+		)
 		GROUP BY t.id, t.name
 		ORDER BY t.id`,
-		doneWindowDays,
+		doneWindowDays, actorID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying team stats: %w", err)
@@ -54,9 +59,9 @@ func (r *Repository) TeamStats(ctx context.Context, doneWindowDays int) ([]domai
 	return stats, nil
 }
 
-// TopCreators returns the top-N task creators per team within the window.
-// Ties are broken by user ID to keep the ranking deterministic.
-func (r *Repository) TopCreators(ctx context.Context, windowDays, limit int) ([]domain.TeamTopCreator, error) {
+// TopCreators returns the top-N task creators within the window per team the
+// actor belongs to. Ties are broken by user ID to keep the ranking deterministic.
+func (r *Repository) TopCreators(ctx context.Context, actorID int64, windowDays, limit int) ([]domain.TeamTopCreator, error) {
 	rows, err := r.pool.QueryContext(ctx, `
 		SELECT team_id, team_name, user_id, user_name, created_count, rnk
 		FROM (
@@ -73,11 +78,15 @@ func (r *Repository) TopCreators(ctx context.Context, windowDays, limit int) ([]
 		    JOIN tasks ta ON ta.team_id = t.id
 		                 AND ta.created_at >= NOW() - INTERVAL ? DAY
 		    JOIN users u  ON u.id = ta.created_by
+		    WHERE EXISTS (
+		        SELECT 1 FROM team_members am
+		        WHERE am.team_id = t.id AND am.user_id = ?
+		    )
 		    GROUP BY t.id, t.name, u.id, u.name
 		) ranked
 		WHERE rnk <= ?
 		ORDER BY team_id, rnk`,
-		windowDays, limit,
+		windowDays, actorID, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying top creators: %w", err)
@@ -98,9 +107,10 @@ func (r *Repository) TopCreators(ctx context.Context, windowDays, limit int) ([]
 	return creators, nil
 }
 
-// OrphanedAssignees returns tasks whose assignee is not a member of the
-// task's team, so integrity violations surface before they confuse users.
-func (r *Repository) OrphanedAssignees(ctx context.Context) ([]domain.OrphanedAssigneeTask, error) {
+// OrphanedAssignees returns tasks in the actor's teams whose assignee is not
+// a member of the task's team, so integrity violations surface before they
+// confuse users.
+func (r *Repository) OrphanedAssignees(ctx context.Context, actorID int64) ([]domain.OrphanedAssigneeTask, error) {
 	rows, err := r.pool.QueryContext(ctx, `
 		SELECT ta.id, ta.title, ta.team_id, ta.assignee_id
 		FROM tasks ta
@@ -111,7 +121,12 @@ func (r *Repository) OrphanedAssignees(ctx context.Context) ([]domain.OrphanedAs
 		      WHERE tm.team_id = ta.team_id
 		        AND tm.user_id = ta.assignee_id
 		  )
+		  AND EXISTS (
+		      SELECT 1 FROM team_members am
+		      WHERE am.team_id = ta.team_id AND am.user_id = ?
+		  )
 		ORDER BY ta.id`,
+		actorID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying orphaned assignees: %w", err)

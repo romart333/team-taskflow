@@ -49,7 +49,7 @@ func TestAnalyticsQueries(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("team stats aggregates members and done tasks", func(t *testing.T) {
-		stats, err := analytics.TeamStats(ctx, domain.TeamStatsDoneWindowDays)
+		stats, err := analytics.TeamStats(ctx, ownerID, domain.TeamStatsDoneWindowDays)
 		require.NoError(t, err)
 
 		var found *domain.TeamStats
@@ -63,8 +63,24 @@ func TestAnalyticsQueries(t *testing.T) {
 		assert.EqualValues(t, 1, found.DoneTasksInWindow)
 	})
 
+	t.Run("analytics are hidden from non-members", func(t *testing.T) {
+		strangerID := createUser(t, "AnalyticsStranger")
+
+		stats, err := analytics.TeamStats(ctx, strangerID, domain.TeamStatsDoneWindowDays)
+		require.NoError(t, err)
+		for _, s := range stats {
+			assert.NotEqual(t, teamID, s.TeamID, "stranger must not see the team's stats")
+		}
+
+		creators, err := analytics.TopCreators(ctx, strangerID, domain.TopCreatorsWindowDays, domain.TopCreatorsLimit)
+		require.NoError(t, err)
+		for _, c := range creators {
+			assert.NotEqual(t, teamID, c.TeamID, "stranger must not see the team's creators")
+		}
+	})
+
 	t.Run("top creators ranks by created count", func(t *testing.T) {
-		creators, err := analytics.TopCreators(ctx, domain.TopCreatorsWindowDays, domain.TopCreatorsLimit)
+		creators, err := analytics.TopCreators(ctx, ownerID, domain.TopCreatorsWindowDays, domain.TopCreatorsLimit)
 		require.NoError(t, err)
 
 		var teamCreators []domain.TeamTopCreator
@@ -93,7 +109,7 @@ func TestAnalyticsQueries(t *testing.T) {
 			`DELETE FROM team_members WHERE team_id = ? AND user_id = ?`, teamID, mateID)
 		require.NoError(t, err)
 
-		orphans, err := analytics.OrphanedAssignees(ctx)
+		orphans, err := analytics.OrphanedAssignees(ctx, ownerID)
 		require.NoError(t, err)
 
 		var found bool

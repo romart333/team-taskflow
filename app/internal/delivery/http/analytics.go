@@ -8,9 +8,9 @@ import (
 )
 
 type analyticsUsecase interface {
-	TeamStats(ctx context.Context) ([]domain.TeamStats, error)
-	TopCreators(ctx context.Context) ([]domain.TeamTopCreator, error)
-	OrphanedAssignees(ctx context.Context) ([]domain.OrphanedAssigneeTask, error)
+	TeamStats(ctx context.Context, actorID int64) ([]domain.TeamStats, error)
+	TopCreators(ctx context.Context, actorID int64) ([]domain.TeamTopCreator, error)
+	OrphanedAssignees(ctx context.Context, actorID int64) ([]domain.OrphanedAssigneeTask, error)
 }
 
 type teamStatsItem struct {
@@ -59,7 +59,13 @@ func NewAnalyticsHandler(usecase analyticsUsecase) *AnalyticsHandler {
 func (h *AnalyticsHandler) TeamStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	stats, err := h.usecase.TeamStats(ctx)
+	actor, err := actorID(r)
+	if err != nil {
+		respondError(ctx, w, err)
+		return
+	}
+
+	stats, err := h.usecase.TeamStats(ctx, actor)
 	if err != nil {
 		respondError(ctx, w, err)
 		return
@@ -80,7 +86,13 @@ func (h *AnalyticsHandler) TeamStats(w http.ResponseWriter, r *http.Request) {
 func (h *AnalyticsHandler) TopCreators(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	creators, err := h.usecase.TopCreators(ctx)
+	actor, err := actorID(r)
+	if err != nil {
+		respondError(ctx, w, err)
+		return
+	}
+
+	creators, err := h.usecase.TopCreators(ctx, actor)
 	if err != nil {
 		respondError(ctx, w, err)
 		return
@@ -103,7 +115,13 @@ func (h *AnalyticsHandler) TopCreators(w http.ResponseWriter, r *http.Request) {
 func (h *AnalyticsHandler) OrphanedAssignees(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	tasks, err := h.usecase.OrphanedAssignees(ctx)
+	actor, err := actorID(r)
+	if err != nil {
+		respondError(ctx, w, err)
+		return
+	}
+
+	tasks, err := h.usecase.OrphanedAssignees(ctx, actor)
 	if err != nil {
 		respondError(ctx, w, err)
 		return

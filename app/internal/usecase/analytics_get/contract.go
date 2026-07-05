@@ -10,9 +10,11 @@ import (
 	"team-taskflow/internal/domain"
 )
 
-// AnalyticsRepository is the read port for reporting queries.
+// AnalyticsRepository is the read port for reporting queries. Every query is
+// scoped to teams the actor is a member of: analytics must never leak other
+// teams' data to an arbitrary authenticated user.
 type AnalyticsRepository interface {
-	TeamStats(ctx context.Context, doneWindowDays int) ([]domain.TeamStats, error)
-	TopCreators(ctx context.Context, windowDays, limit int) ([]domain.TeamTopCreator, error)
-	OrphanedAssignees(ctx context.Context) ([]domain.OrphanedAssigneeTask, error)
+	TeamStats(ctx context.Context, actorID int64, doneWindowDays int) ([]domain.TeamStats, error)
+	TopCreators(ctx context.Context, actorID int64, windowDays, limit int) ([]domain.TeamTopCreator, error)
+	OrphanedAssignees(ctx context.Context, actorID int64) ([]domain.OrphanedAssigneeTask, error)
 }
