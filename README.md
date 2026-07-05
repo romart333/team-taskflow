@@ -10,14 +10,15 @@ REST API service for team task management with a role model, audit history and c
 # Local dependencies (MySQL + Redis)
 make up
 
-# Run the service locally
+# Run the service locally (creates app/configs/config.yaml from the example
+# on first run; set auth.jwt_secret there or export AUTH_JWT_SECRET)
 make run
 
 # Or the whole stack in Docker
 docker compose up -d --build
 ```
 
-Configuration lives in `app/configs/config.yaml` with ENV overrides (see `app/configs/config.yaml.example`). Config path is set via `CONFIG_PATH`.
+Configuration lives in `app/configs/config.yaml` (not committed; copy `app/configs/config.yaml.example`) with ENV overrides. Config path is set via `CONFIG_PATH`. The JWT secret has no default: startup fails fast unless `auth.jwt_secret` or `AUTH_JWT_SECRET` is set.
 
 ## Commands
 

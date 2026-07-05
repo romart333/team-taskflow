@@ -39,3 +39,6 @@ go.work.sum
 *.njsproj
 *.sln
 *.sw?
+
+# Local service config (only the .example is committed)
+app/configs/config.yaml

@@ -11,7 +11,7 @@ FROM alpine:3.21
 
 WORKDIR /srv
 COPY --from=build /out/server ./server
-COPY app/configs/config.yaml ./configs/config.yaml
+COPY app/configs/config.yaml.example ./configs/config.yaml
 
 EXPOSE 8080
 ENTRYPOINT ["/srv/server"]

@@ -6,8 +6,11 @@ BUILD_DIR := build
 build:
 	cd $(APP_DIR) && go build -o ../$(BUILD_DIR)/server ./cmd/server
 
-run:
+run: $(APP_DIR)/configs/config.yaml
 	cd $(APP_DIR) && go run ./cmd/server
+
+$(APP_DIR)/configs/config.yaml:
+	cp $(APP_DIR)/configs/config.yaml.example $(APP_DIR)/configs/config.yaml
 
 test: lint test-unit
 

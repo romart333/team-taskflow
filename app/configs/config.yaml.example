@@ -20,7 +20,8 @@ redis:
   db: 0
 
 auth:
-  jwt_secret: "local-dev-secret-change-me"
+  # Required: set in your local copy or via the AUTH_JWT_SECRET env variable.
+  jwt_secret: ""
   token_ttl: 24h
   bcrypt_cost: 10
 
