@@ -45,41 +45,40 @@ type cachedPage struct {
 	Total int64        `json:"total"`
 }
 
-// Get returns the cached page for the filter, with a hit flag.
-func (c *Cache) Get(ctx context.Context, filter domain.TaskFilter) (domain.TaskPage, bool, error) {
-	key, err := c.pageKey(ctx, filter)
+// Get returns the cached page for the filter, a hit flag and the team cache
+// version observed at read time (to be passed back to Set).
+func (c *Cache) Get(ctx context.Context, filter domain.TaskFilter) (domain.TaskPage, bool, int64, error) {
+	version, err := c.teamVersion(ctx, filter.TeamID)
 	if err != nil {
-		return domain.TaskPage{}, false, err
+		return domain.TaskPage{}, false, 0, err
 	}
 
-	payload, err := c.client.Get(ctx, key).Bytes()
+	payload, err := c.client.Get(ctx, pageKey(filter, version)).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return domain.TaskPage{}, false, nil
+			return domain.TaskPage{}, false, version, nil
 		}
-		return domain.TaskPage{}, false, fmt.Errorf("reading cached page: %w", err)
+		return domain.TaskPage{}, false, 0, fmt.Errorf("reading cached page: %w", err)
 	}
 
 	var page cachedPage
 	if err := json.Unmarshal(payload, &page); err != nil {
-		return domain.TaskPage{}, false, fmt.Errorf("decoding cached page: %w", err)
+		return domain.TaskPage{}, false, 0, fmt.Errorf("decoding cached page: %w", err)
 	}
-	return page.toDomain(), true, nil
+	return page.toDomain(), true, version, nil
 }
 
-// Set stores the page under the team's current cache version with a TTL.
-func (c *Cache) Set(ctx context.Context, filter domain.TaskFilter, page domain.TaskPage) error {
-	key, err := c.pageKey(ctx, filter)
-	if err != nil {
-		return err
-	}
-
+// Set stores the page with a TTL under the version the caller observed in Get.
+// Re-reading the current version here would race with InvalidateTeam: a page
+// read from the DB before the bump would be stored under the new version,
+// re-poisoning the cache the invalidation just cleared.
+func (c *Cache) Set(ctx context.Context, filter domain.TaskFilter, version int64, page domain.TaskPage) error {
 	payload, err := json.Marshal(toCached(page))
 	if err != nil {
 		return fmt.Errorf("encoding page for cache: %w", err)
 	}
 
-	if err := c.client.Set(ctx, key, payload, c.ttl).Err(); err != nil {
+	if err := c.client.Set(ctx, pageKey(filter, version), payload, c.ttl).Err(); err != nil {
 		return fmt.Errorf("writing cached page: %w", err)
 	}
 	return nil
@@ -93,12 +92,15 @@ func (c *Cache) InvalidateTeam(ctx context.Context, teamID int64) error {
 	return nil
 }
 
-func (c *Cache) pageKey(ctx context.Context, filter domain.TaskFilter) (string, error) {
-	version, err := c.client.Get(ctx, versionKey(filter.TeamID)).Int64()
+func (c *Cache) teamVersion(ctx context.Context, teamID int64) (int64, error) {
+	version, err := c.client.Get(ctx, versionKey(teamID)).Int64()
 	if err != nil && !errors.Is(err, redis.Nil) {
-		return "", fmt.Errorf("reading team cache version: %w", err)
+		return 0, fmt.Errorf("reading team cache version: %w", err)
 	}
+	return version, nil
+}
 
+func pageKey(filter domain.TaskFilter, version int64) string {
 	status := ""
 	if filter.Status != nil {
 		status = string(*filter.Status)
@@ -109,7 +111,7 @@ func (c *Cache) pageKey(ctx context.Context, filter domain.TaskFilter) (string, 
 	}
 
 	return fmt.Sprintf("tasks:team:%d:v%d:s=%s:a=%s:p=%d:ps=%d",
-		filter.TeamID, version, status, assignee, filter.Page, filter.PageSize), nil
+		filter.TeamID, version, status, assignee, filter.Page, filter.PageSize)
 }
 
 func versionKey(teamID int64) string {

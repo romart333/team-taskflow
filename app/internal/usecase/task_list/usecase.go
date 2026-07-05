@@ -34,7 +34,8 @@ func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
 		return Output{}, fmt.Errorf("getting membership: %w", err)
 	}
 
-	page, hit, err := u.cache.Get(ctx, filter)
+	page, hit, version, err := u.cache.Get(ctx, filter)
+	cacheUsable := err == nil
 	if err != nil {
 		slog.WarnContext(ctx, "task list cache read failed", "team_id", filter.TeamID, "error", err)
 	}
@@ -47,8 +48,12 @@ func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
 		return Output{}, fmt.Errorf("listing tasks: %w", err)
 	}
 
-	if err := u.cache.Set(ctx, filter, page); err != nil {
-		slog.WarnContext(ctx, "task list cache write failed", "team_id", filter.TeamID, "error", err)
+	// Without a version observed before the DB read the write cannot be made
+	// invalidation-safe, so a failed cache read also skips the write.
+	if cacheUsable {
+		if err := u.cache.Set(ctx, filter, version, page); err != nil {
+			slog.WarnContext(ctx, "task list cache write failed", "team_id", filter.TeamID, "error", err)
+		}
 	}
 
 	return Output{Page: page, PageNum: filter.Page, PageSize: filter.PageSize}, nil

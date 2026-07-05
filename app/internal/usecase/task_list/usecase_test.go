@@ -34,20 +34,23 @@ func (m *teamRepoMock) GetMember(context.Context, int64, int64) (domain.TeamMemb
 }
 
 type cacheMock struct {
-	page     domain.TaskPage
-	hit      bool
-	getErr   error
-	setErr   error
-	setCalls int
-	gotSet   domain.TaskPage
+	page       domain.TaskPage
+	hit        bool
+	version    int64
+	getErr     error
+	setErr     error
+	setCalls   int
+	gotSet     domain.TaskPage
+	gotVersion int64
 }
 
-func (m *cacheMock) Get(context.Context, domain.TaskFilter) (domain.TaskPage, bool, error) {
-	return m.page, m.hit, m.getErr
+func (m *cacheMock) Get(context.Context, domain.TaskFilter) (domain.TaskPage, bool, int64, error) {
+	return m.page, m.hit, m.version, m.getErr
 }
 
-func (m *cacheMock) Set(_ context.Context, _ domain.TaskFilter, page domain.TaskPage) error {
+func (m *cacheMock) Set(_ context.Context, _ domain.TaskFilter, version int64, page domain.TaskPage) error {
 	m.setCalls++
+	m.gotVersion = version
 	m.gotSet = page
 	return m.setErr
 }
@@ -69,9 +72,9 @@ func TestUsecase_Handle(t *testing.T) {
 		assert.Zero(t, repo.calls)
 	})
 
-	t.Run("cache miss loads db and populates cache", func(t *testing.T) {
+	t.Run("cache miss loads db and populates cache under the version seen at read time", func(t *testing.T) {
 		repo := &taskRepoMock{page: dbPage}
-		cache := &cacheMock{}
+		cache := &cacheMock{version: 7}
 
 		out, err := New(repo, &teamRepoMock{}, cache, pagination).
 			Handle(context.Background(), Input{ActorID: 5, Filter: domain.TaskFilter{TeamID: 1}})
@@ -81,6 +84,7 @@ func TestUsecase_Handle(t *testing.T) {
 		assert.Equal(t, 1, repo.calls)
 		assert.Equal(t, 1, cache.setCalls)
 		assert.Equal(t, dbPage, cache.gotSet)
+		assert.EqualValues(t, 7, cache.gotVersion, "Set must reuse the version observed by Get")
 	})
 
 	t.Run("pagination is normalized", func(t *testing.T) {
@@ -104,7 +108,7 @@ func TestUsecase_Handle(t *testing.T) {
 		require.ErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
-	t.Run("cache failures degrade to db", func(t *testing.T) {
+	t.Run("cache failures degrade to db and skip the cache write", func(t *testing.T) {
 		repo := &taskRepoMock{page: dbPage}
 		cache := &cacheMock{getErr: errors.New("redis down"), setErr: errors.New("redis down")}
 
@@ -113,6 +117,7 @@ func TestUsecase_Handle(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, dbPage, out.Page)
+		assert.Zero(t, cache.setCalls, "an unversioned page must not be written to the cache")
 	})
 
 	t.Run("repository failure", func(t *testing.T) {

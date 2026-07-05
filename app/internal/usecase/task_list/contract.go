@@ -36,6 +36,10 @@ type TeamRepository interface {
 
 // TaskListCache caches task listing pages per team (best effort).
 type TaskListCache interface {
-	Get(ctx context.Context, filter domain.TaskFilter) (domain.TaskPage, bool, error)
-	Set(ctx context.Context, filter domain.TaskFilter, page domain.TaskPage) error
+	// Get returns the cached page, a hit flag and the cache version observed
+	// at read time. Pass that version to Set: a concurrent invalidation bumps
+	// the version, making a stale write land on an unreachable key instead of
+	// re-poisoning the cache.
+	Get(ctx context.Context, filter domain.TaskFilter) (page domain.TaskPage, hit bool, version int64, err error)
+	Set(ctx context.Context, filter domain.TaskFilter, version int64, page domain.TaskPage) error
 }
