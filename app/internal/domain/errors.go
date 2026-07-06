@@ -41,6 +41,11 @@ func NewConflictError(msg string) error {
 	return &SafeError{Kind: ErrConflict, Msg: msg}
 }
 
+// NewAlreadyExistsError builds a client-visible uniqueness-conflict error.
+func NewAlreadyExistsError(msg string) error {
+	return &SafeError{Kind: ErrAlreadyExists, Msg: msg}
+}
+
 // NewPermissionDeniedError builds a client-visible permission error.
 func NewPermissionDeniedError(msg string) error {
 	return &SafeError{Kind: ErrPermissionDenied, Msg: msg}

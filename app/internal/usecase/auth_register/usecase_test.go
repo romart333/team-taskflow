@@ -97,3 +97,14 @@ func TestUsecase_Handle(t *testing.T) {
 		})
 	}
 }
+
+func TestUsecase_Handle_DuplicateEmailMessage(t *testing.T) {
+	uc := New(&userRepoMock{createErr: domain.ErrAlreadyExists}, &hasherMock{hash: "hashed"})
+
+	_, err := uc.Handle(context.Background(), Input{Email: "a@b.com", Password: "password1", Name: "Alice"})
+
+	require.ErrorIs(t, err, domain.ErrAlreadyExists)
+	var safeErr *domain.SafeError
+	require.ErrorAs(t, err, &safeErr, "the client must receive a safe, human-readable message")
+	assert.Equal(t, "user with this email already exists", safeErr.Msg)
+}

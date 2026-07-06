@@ -7,12 +7,10 @@ import (
 	"fmt"
 
 	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
-	"github.com/go-sql-driver/mysql"
 
 	"team-taskflow/internal/domain"
+	"team-taskflow/internal/repository/mysql/mysqlerr"
 )
-
-const mysqlErrDuplicateEntry = 1062
 
 type Repository struct {
 	pool   *sql.DB
@@ -31,10 +29,10 @@ func (r *Repository) Create(ctx context.Context, user domain.User) (int64, error
 		user.Email, user.PasswordHash, user.Name,
 	)
 	if err != nil {
-		var mysqlErr *mysql.MySQLError
-		if errors.As(err, &mysqlErr) && mysqlErr.Number == mysqlErrDuplicateEntry {
-			return 0, fmt.Errorf("inserting user with email %q: %w", user.Email,
-				&domain.SafeError{Kind: domain.ErrAlreadyExists, Msg: "user with this email already exists"})
+		if mysqlerr.IsDuplicateEntry(err) {
+			// The client-facing wording is the usecase's concern; the
+			// repository only classifies the failure.
+			return 0, fmt.Errorf("user with email %q: %w", user.Email, domain.ErrAlreadyExists)
 		}
 		return 0, fmt.Errorf("inserting user: %w", err)
 	}

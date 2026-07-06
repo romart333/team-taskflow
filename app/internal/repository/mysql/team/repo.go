@@ -7,12 +7,10 @@ import (
 	"fmt"
 
 	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
-	"github.com/go-sql-driver/mysql"
 
 	"team-taskflow/internal/domain"
+	"team-taskflow/internal/repository/mysql/mysqlerr"
 )
-
-const mysqlErrDuplicateEntry = 1062
 
 type Repository struct {
 	pool   *sql.DB
@@ -65,8 +63,7 @@ func (r *Repository) AddMember(ctx context.Context, member domain.TeamMember) er
 		member.TeamID, member.UserID, string(member.Role),
 	)
 	if err != nil {
-		var mysqlErr *mysql.MySQLError
-		if errors.As(err, &mysqlErr) && mysqlErr.Number == mysqlErrDuplicateEntry {
+		if mysqlerr.IsDuplicateEntry(err) {
 			return fmt.Errorf("membership team=%d user=%d: %w", member.TeamID, member.UserID, domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("inserting team member: %w", err)

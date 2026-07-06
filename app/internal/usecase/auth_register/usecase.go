@@ -2,6 +2,7 @@ package auth_register
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -38,6 +39,10 @@ func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
 		PasswordHash: hash,
 	})
 	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return Output{}, fmt.Errorf("creating user: %w",
+				domain.NewAlreadyExistsError("user with this email already exists"))
+		}
 		return Output{}, fmt.Errorf("creating user: %w", err)
 	}
 
