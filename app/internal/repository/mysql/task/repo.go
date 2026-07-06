@@ -44,13 +44,22 @@ func (r *Repository) Create(ctx context.Context, task domain.Task) (int64, error
 }
 
 func (r *Repository) GetByID(ctx context.Context, taskID int64) (domain.Task, error) {
+	return r.getByID(ctx, taskID, "")
+}
+
+// GetByIDForUpdate loads the task and locks its row until the surrounding
+// transaction ends, serializing concurrent updates of the same task. Outside
+// a transaction the lock is a no-op.
+func (r *Repository) GetByIDForUpdate(ctx context.Context, taskID int64) (domain.Task, error) {
+	return r.getByID(ctx, taskID, " FOR UPDATE")
+}
+
+func (r *Repository) getByID(ctx context.Context, taskID int64, lock string) (domain.Task, error) {
 	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
-	var entity taskEntity
-	err := executor.QueryRowContext(ctx,
-		`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, taskID,
-	).Scan(&entity.ID, &entity.TeamID, &entity.Title, &entity.Description, &entity.Status,
-		&entity.AssigneeID, &entity.CreatedBy, &entity.CreatedAt, &entity.UpdatedAt)
+	entity, err := scanTask(executor.QueryRowContext(ctx,
+		`SELECT `+taskColumns+` FROM tasks WHERE id = ?`+lock, taskID,
+	).Scan)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Task{}, fmt.Errorf("no task with id=%d: %w", taskID, domain.ErrNotFound)
@@ -118,9 +127,8 @@ func (r *Repository) List(ctx context.Context, filter domain.TaskFilter) (domain
 
 	tasks := make([]domain.Task, 0, filter.PageSize)
 	for rows.Next() {
-		var entity taskEntity
-		if err := rows.Scan(&entity.ID, &entity.TeamID, &entity.Title, &entity.Description, &entity.Status,
-			&entity.AssigneeID, &entity.CreatedBy, &entity.CreatedAt, &entity.UpdatedAt); err != nil {
+		entity, err := scanTask(rows.Scan)
+		if err != nil {
 			return domain.TaskPage{}, fmt.Errorf("scanning task row: %w", err)
 		}
 		tasks = append(tasks, entity.toDomain())

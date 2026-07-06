@@ -13,6 +13,10 @@ type Input struct {
 	Title       *string
 	Description *string
 	Status      *string
+	// SetAssignee marks an explicit assignee change (a JSON null is
+	// indistinguishable from an absent field otherwise): AssigneeID nil then
+	// unassigns the task, non-nil assigns the given member.
+	SetAssignee bool
 	AssigneeID  *int64
 }
 
@@ -24,10 +28,21 @@ type Output struct {
 type TaskRepository interface {
 	// GetByID returns domain.ErrNotFound when the task does not exist.
 	GetByID(ctx context.Context, taskID int64) (domain.Task, error)
+	// GetByIDForUpdate additionally locks the row until the surrounding
+	// transaction ends, serializing concurrent updates of the same task so
+	// they cannot overwrite each other's fields from stale snapshots.
+	GetByIDForUpdate(ctx context.Context, taskID int64) (domain.Task, error)
 	Update(ctx context.Context, task domain.Task) error
 }
 
-// TeamRepository checks team memberships.
+// TeamAccess authorizes the actor as a member of a team.
+type TeamAccess interface {
+	// EnsureTeamMember returns a client-visible domain.ErrPermissionDenied
+	// when the actor is not a member of the team.
+	EnsureTeamMember(ctx context.Context, teamID, actorID int64) error
+}
+
+// TeamRepository checks team memberships (used to validate the assignee).
 type TeamRepository interface {
 	// GetMember returns domain.ErrNotFound when the user is not a member.
 	GetMember(ctx context.Context, teamID, userID int64) (domain.TeamMember, error)

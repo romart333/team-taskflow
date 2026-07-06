@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"team-taskflow/internal/usecase/task_update"
@@ -11,11 +12,27 @@ type taskUpdateUsecase interface {
 	Handle(ctx context.Context, in task_update.Input) (task_update.Output, error)
 }
 
+// optionalInt64 distinguishes an absent JSON field from an explicit null, so
+// PUT bodies can unassign a task with {"assignee_id": null}.
+type optionalInt64 struct {
+	Set   bool
+	Value *int64
+}
+
+func (o *optionalInt64) UnmarshalJSON(data []byte) error {
+	o.Set = true
+	if string(data) == "null" {
+		o.Value = nil
+		return nil
+	}
+	return json.Unmarshal(data, &o.Value)
+}
+
 type taskUpdateRequest struct {
-	Title       *string `json:"title,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Status      *string `json:"status,omitempty"`
-	AssigneeID  *int64  `json:"assignee_id,omitempty"`
+	Title       *string       `json:"title,omitempty"`
+	Description *string       `json:"description,omitempty"`
+	Status      *string       `json:"status,omitempty"`
+	AssigneeID  optionalInt64 `json:"assignee_id"`
 }
 
 type TaskUpdateHandler struct {
@@ -53,7 +70,8 @@ func (h *TaskUpdateHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
-		AssigneeID:  req.AssigneeID,
+		SetAssignee: req.AssigneeID.Set,
+		AssigneeID:  req.AssigneeID.Value,
 	})
 	if err != nil {
 		respondError(ctx, w, err)

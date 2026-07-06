@@ -3,7 +3,6 @@ package task_update
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,9 +16,19 @@ type taskRepoMock struct {
 	getErr    error
 	updateErr error
 	gotUpdate *domain.Task
+	lockCalls int
+}
+
+func (m *taskRepoMock) GetByIDForUpdate(context.Context, int64) (domain.Task, error) {
+	m.lockCalls++
+	return m.get()
 }
 
 func (m *taskRepoMock) GetByID(context.Context, int64) (domain.Task, error) {
+	return m.get()
+}
+
+func (m *taskRepoMock) get() (domain.Task, error) {
 	if m.gotUpdate != nil {
 		return *m.gotUpdate, m.getErr
 	}
@@ -33,11 +42,23 @@ func (m *taskRepoMock) Update(_ context.Context, task domain.Task) error {
 	return m.updateErr
 }
 
+type accessMock struct {
+	err   error
+	calls int
+}
+
+func (m *accessMock) EnsureTeamMember(context.Context, int64, int64) error {
+	m.calls++
+	return m.err
+}
+
 type teamRepoMock struct {
-	errs map[int64]error
+	errs  map[int64]error
+	calls int
 }
 
 func (m *teamRepoMock) GetMember(_ context.Context, _ int64, userID int64) (domain.TeamMember, error) {
+	m.calls++
 	if err, ok := m.errs[userID]; ok {
 		return domain.TeamMember{}, err
 	}
@@ -68,20 +89,40 @@ func (m *invalidatorMock) InvalidateTeam(context.Context, int64) error {
 	return nil
 }
 
+type fixture struct {
+	tasks   *taskRepoMock
+	access  *accessMock
+	teams   *teamRepoMock
+	history *historyRepoMock
+	tx      *txMock
+	cache   *invalidatorMock
+}
+
+func newFixture(task domain.Task) *fixture {
+	return &fixture{
+		tasks:   &taskRepoMock{task: task},
+		access:  &accessMock{},
+		teams:   &teamRepoMock{},
+		history: &historyRepoMock{},
+		tx:      &txMock{},
+		cache:   &invalidatorMock{},
+	}
+}
+
+func (f *fixture) usecase() *Usecase {
+	return New(f.tasks, f.access, f.teams, f.history, f.tx, f.cache)
+}
+
 func TestUsecase_Handle(t *testing.T) {
 	baseTask := domain.Task{
 		ID: 7, TeamID: 1, Title: "Old title", Description: "Old desc",
 		Status: domain.TaskStatusTodo, CreatedBy: 5,
 	}
 
-	t.Run("changes are persisted with history in one transaction", func(t *testing.T) {
-		tasks := &taskRepoMock{task: baseTask}
-		history := &historyRepoMock{}
-		transaction := &txMock{}
-		cache := &invalidatorMock{}
-		uc := New(tasks, &teamRepoMock{}, history, transaction, cache)
+	t.Run("changes are read, written and audited inside one transaction", func(t *testing.T) {
+		f := newFixture(baseTask)
 
-		out, err := uc.Handle(context.Background(), Input{
+		out, err := f.usecase().Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7,
 			Title:  new("New title"),
 			Status: new("done"),
@@ -90,89 +131,125 @@ func TestUsecase_Handle(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "New title", out.Task.Title)
 		assert.Equal(t, domain.TaskStatusDone, out.Task.Status)
-		assert.Equal(t, 1, transaction.calls)
-		assert.Equal(t, 1, cache.calls)
-		require.Len(t, history.entries, 2)
+		assert.Equal(t, 1, f.tx.calls)
+		assert.Equal(t, 1, f.tasks.lockCalls, "snapshot must be read with a row lock")
+		assert.Equal(t, 1, f.cache.calls)
+		require.Len(t, f.history.entries, 2)
 		assert.Equal(t, domain.TaskHistoryEntry{
 			TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldTitle,
 			OldValue: "Old title", NewValue: "New title",
-		}, history.entries[0])
+		}, f.history.entries[0])
 		assert.Equal(t, domain.TaskHistoryEntry{
 			TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldStatus,
 			OldValue: "todo", NewValue: "done",
-		}, history.entries[1])
+		}, f.history.entries[1])
 	})
 
-	t.Run("no-op update skips transaction and history", func(t *testing.T) {
-		tasks := &taskRepoMock{task: baseTask}
-		history := &historyRepoMock{}
-		transaction := &txMock{}
-		cache := &invalidatorMock{}
-		uc := New(tasks, &teamRepoMock{}, history, transaction, cache)
+	t.Run("no-op update writes no history and keeps the cache", func(t *testing.T) {
+		f := newFixture(baseTask)
 
-		out, err := uc.Handle(context.Background(), Input{
+		out, err := f.usecase().Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7, Title: new("Old title"),
 		})
 
 		require.NoError(t, err)
 		assert.Equal(t, baseTask, out.Task)
-		assert.Zero(t, transaction.calls)
-		assert.Empty(t, history.entries)
-		assert.Zero(t, cache.calls)
+		assert.Nil(t, f.tasks.gotUpdate, "no write must happen")
+		assert.Empty(t, f.history.entries)
+		assert.Zero(t, f.cache.calls)
 	})
 
 	t.Run("task not found", func(t *testing.T) {
-		tasks := &taskRepoMock{getErr: domain.ErrNotFound}
-		uc := New(tasks, &teamRepoMock{}, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
+		f := newFixture(baseTask)
+		f.tasks = &taskRepoMock{getErr: domain.ErrNotFound}
 
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
-
-		require.ErrorIs(t, err, domain.ErrNotFound)
-	})
-
-	t.Run("task deleted concurrently during update maps to client-visible not found", func(t *testing.T) {
-		tasks := &taskRepoMock{
-			task:      baseTask,
-			updateErr: fmt.Errorf("no task with id=7: %w", domain.ErrNotFound),
-		}
-		uc := New(tasks, &teamRepoMock{}, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
-
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("New title")})
+		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
 		require.ErrorIs(t, err, domain.ErrNotFound)
 		var safeErr *domain.SafeError
-		require.ErrorAs(t, err, &safeErr, "race must surface as a client-visible not-found error")
+		require.ErrorAs(t, err, &safeErr)
 		assert.Equal(t, "task not found", safeErr.Msg)
 	})
 
 	t.Run("non-member is rejected", func(t *testing.T) {
-		tasks := &taskRepoMock{task: baseTask}
-		teams := &teamRepoMock{errs: map[int64]error{5: domain.ErrNotFound}}
-		uc := New(tasks, teams, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
+		f := newFixture(baseTask)
+		f.access = &accessMock{err: domain.NewPermissionDeniedError("not a member")}
 
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
 
 		require.ErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
 	t.Run("invalid status", func(t *testing.T) {
-		tasks := &taskRepoMock{task: baseTask}
-		uc := New(tasks, &teamRepoMock{}, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
+		f := newFixture(baseTask)
 
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Status: new("archived")})
+		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Status: new("archived")})
 
 		require.ErrorIs(t, err, domain.ErrValidation)
 	})
 
 	t.Run("assignee outside the team", func(t *testing.T) {
 		outsider := int64(99)
-		tasks := &taskRepoMock{task: baseTask}
-		teams := &teamRepoMock{errs: map[int64]error{99: domain.ErrNotFound}}
-		uc := New(tasks, teams, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
+		f := newFixture(baseTask)
+		f.teams = &teamRepoMock{errs: map[int64]error{99: domain.ErrNotFound}}
 
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, AssigneeID: &outsider})
+		_, err := f.usecase().Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: &outsider,
+		})
 
 		require.ErrorIs(t, err, domain.ErrValidation)
+	})
+
+	t.Run("explicit null unassigns the task and is audited", func(t *testing.T) {
+		member := int64(9)
+		assigned := baseTask
+		assigned.AssigneeID = &member
+		f := newFixture(assigned)
+
+		out, err := f.usecase().Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: nil,
+		})
+
+		require.NoError(t, err)
+		assert.Nil(t, out.Task.AssigneeID)
+		require.Len(t, f.history.entries, 1)
+		assert.Equal(t, domain.TaskHistoryEntry{
+			TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldAssignee,
+			OldValue: "9", NewValue: "",
+		}, f.history.entries[0])
+	})
+
+	t.Run("absent assignee field leaves the assignee unchanged", func(t *testing.T) {
+		member := int64(9)
+		assigned := baseTask
+		assigned.AssigneeID = &member
+		f := newFixture(assigned)
+
+		out, err := f.usecase().Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, Title: new("New title"),
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, out.Task.AssigneeID)
+		assert.Equal(t, member, *out.Task.AssigneeID)
+		assert.Zero(t, f.teams.calls, "no assignee membership lookup expected")
+	})
+
+	t.Run("re-assigning the same member skips the membership lookup", func(t *testing.T) {
+		member := int64(9)
+		assigned := baseTask
+		assigned.AssigneeID = &member
+		f := newFixture(assigned)
+
+		out, err := f.usecase().Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: &member,
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, out.Task.AssigneeID)
+		assert.Equal(t, member, *out.Task.AssigneeID)
+		assert.Zero(t, f.teams.calls, "unchanged assignee must not be re-validated")
+		assert.Empty(t, f.history.entries)
 	})
 }
 
@@ -181,44 +258,46 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	dbErr := errors.New("db down")
 
 	t.Run("membership check failure", func(t *testing.T) {
-		teams := &teamRepoMock{errs: map[int64]error{5: dbErr}}
-		uc := New(&taskRepoMock{task: baseTask}, teams, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		f := newFixture(baseTask)
+		f.access = &accessMock{err: dbErr}
+		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
 	t.Run("assignee check failure", func(t *testing.T) {
 		outsider := int64(99)
-		teams := &teamRepoMock{errs: map[int64]error{99: dbErr}}
-		uc := New(&taskRepoMock{task: baseTask}, teams, &historyRepoMock{}, &txMock{}, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, AssigneeID: &outsider})
+		f := newFixture(baseTask)
+		f.teams = &teamRepoMock{errs: map[int64]error{99: dbErr}}
+		_, err := f.usecase().Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: &outsider,
+		})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrValidation)
 	})
 
-	t.Run("update failure rolls back", func(t *testing.T) {
-		tasks := &taskRepoMock{task: baseTask, updateErr: dbErr}
-		history := &historyRepoMock{}
-		uc := New(tasks, &teamRepoMock{}, history, &txMock{}, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+	t.Run("update failure rolls back and skips history and cache", func(t *testing.T) {
+		f := newFixture(baseTask)
+		f.tasks = &taskRepoMock{task: baseTask, updateErr: dbErr}
+		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
 		require.Error(t, err)
-		assert.Empty(t, history.entries)
+		assert.Empty(t, f.history.entries)
+		assert.Zero(t, f.cache.calls)
 	})
 
 	t.Run("history write failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: baseTask}, &teamRepoMock{}, &historyRepoMock{err: dbErr}, &txMock{}, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		f := newFixture(baseTask)
+		f.history = &historyRepoMock{err: dbErr}
+		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
 		require.Error(t, err)
 	})
 
 	t.Run("description change is audited", func(t *testing.T) {
-		history := &historyRepoMock{}
-		uc := New(&taskRepoMock{task: baseTask}, &teamRepoMock{}, history, &txMock{}, &invalidatorMock{})
-		out, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Description: new("new desc")})
+		f := newFixture(baseTask)
+		out, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Description: new("new desc")})
 		require.NoError(t, err)
 		assert.Equal(t, "new desc", out.Task.Description)
-		require.Len(t, history.entries, 1)
-		assert.Equal(t, domain.TaskFieldDescription, history.entries[0].Field)
+		require.Len(t, f.history.entries, 1)
+		assert.Equal(t, domain.TaskFieldDescription, f.history.entries[0].Field)
 	})
 }

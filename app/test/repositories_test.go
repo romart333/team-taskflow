@@ -162,6 +162,13 @@ func TestTaskRepositoryUpdate(t *testing.T) {
 	task, err := tasks.GetByID(ctx, taskID)
 	require.NoError(t, err)
 
+	locked, err := tasks.GetByIDForUpdate(ctx, taskID)
+	require.NoError(t, err)
+	assert.Equal(t, task, locked, "locking read must return the same row")
+
+	_, err = tasks.GetByIDForUpdate(ctx, taskID+1_000_000)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+
 	require.NoError(t, tasks.Update(ctx, task), "no-op update must succeed")
 
 	task.ID = taskID + 1_000_000

@@ -36,6 +36,15 @@ func (e taskEntity) toDomain() domain.Task {
 	return task
 }
 
+// scanTask reads one row in taskColumns order via the given Scan function,
+// keeping the column list and its scan targets in a single place.
+func scanTask(scan func(dest ...any) error) (taskEntity, error) {
+	var e taskEntity
+	err := scan(&e.ID, &e.TeamID, &e.Title, &e.Description, &e.Status,
+		&e.AssigneeID, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt)
+	return e, err
+}
+
 func assigneeParam(id *int64) sql.NullInt64 {
 	if id == nil {
 		return sql.NullInt64{}

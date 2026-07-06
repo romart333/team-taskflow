@@ -112,7 +112,7 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		DefaultPageSize: cfg.Pagination.DefaultPageSize,
 		MaxPageSize:     cfg.Pagination.MaxPageSize,
 	})
-	taskUpdateUsecase := task_update.New(taskRepository, teamRepository, historyRepository, txManager, taskListCache)
+	taskUpdateUsecase := task_update.New(taskRepository, accessService, teamRepository, historyRepository, txManager, taskListCache)
 	taskHistoryUsecase := task_history_get.New(accessService, historyRepository)
 	commentCreateUsecase := comment_create.New(accessService, commentRepository)
 	commentListUsecase := comment_list.New(accessService, commentRepository)
