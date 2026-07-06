@@ -11,22 +11,13 @@ import (
 	"team-taskflow/internal/domain"
 )
 
-type taskRepoMock struct {
+type accessMock struct {
 	task domain.Task
 	err  error
 }
 
-func (m *taskRepoMock) GetByID(context.Context, int64) (domain.Task, error) {
+func (m *accessMock) LoadTaskForMember(context.Context, int64, int64) (domain.Task, error) {
 	return m.task, m.err
-}
-
-type teamRepoMock struct{ err error }
-
-func (m *teamRepoMock) GetMember(context.Context, int64, int64) (domain.TeamMember, error) {
-	if m.err != nil {
-		return domain.TeamMember{}, m.err
-	}
-	return domain.TeamMember{Role: domain.RoleMember}, nil
 }
 
 type commentRepoMock struct {
@@ -50,7 +41,7 @@ func TestUsecase_Handle(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		comments := &commentRepoMock{createID: 3, comment: domain.TaskComment{ID: 3, TaskID: 7, Body: "LGTM"}}
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{}, comments)
+		uc := New(&accessMock{task: task}, comments)
 
 		out, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Body: "LGTM"})
 
@@ -60,7 +51,7 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("empty body", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{}, &commentRepoMock{})
+		uc := New(&accessMock{task: task}, &commentRepoMock{})
 
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Body: ""})
 
@@ -68,7 +59,7 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("task not found", func(t *testing.T) {
-		uc := New(&taskRepoMock{err: domain.ErrNotFound}, &teamRepoMock{}, &commentRepoMock{})
+		uc := New(&accessMock{err: domain.NewNotFoundError("task not found")}, &commentRepoMock{})
 
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Body: "hi"})
 
@@ -76,7 +67,7 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("non-member is rejected", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{err: domain.ErrNotFound}, &commentRepoMock{})
+		uc := New(&accessMock{err: domain.NewPermissionDeniedError("not a member")}, &commentRepoMock{})
 
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Body: "hi"})
 
@@ -88,22 +79,16 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	task := domain.Task{ID: 7, TeamID: 1}
 	dbErr := errors.New("db down")
 
-	t.Run("task load failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{err: dbErr}, &teamRepoMock{}, &commentRepoMock{})
+	t.Run("access check failure", func(t *testing.T) {
+		uc := New(&accessMock{err: dbErr}, &commentRepoMock{})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Body: "hi"})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrNotFound)
-	})
-
-	t.Run("membership load failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{err: dbErr}, &commentRepoMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Body: "hi"})
-		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
 	t.Run("create failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{}, &commentRepoMock{createErr: dbErr})
+		uc := New(&accessMock{task: task}, &commentRepoMock{createErr: dbErr})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Body: "hi"})
 		require.Error(t, err)
 	})

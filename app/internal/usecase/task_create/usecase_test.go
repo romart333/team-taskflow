@@ -40,6 +40,12 @@ func (m *teamRepoMock) GetMember(_ context.Context, _ int64, userID int64) (doma
 	return domain.TeamMember{UserID: userID, Role: domain.RoleMember}, nil
 }
 
+type accessMock struct{ err error }
+
+func (m *accessMock) EnsureTeamMember(context.Context, int64, int64) error {
+	return m.err
+}
+
 type invalidatorMock struct {
 	err   error
 	calls int
@@ -57,28 +63,32 @@ func TestUsecase_Handle(t *testing.T) {
 		name    string
 		input   Input
 		tasks   *taskRepoMock
+		access  *accessMock
 		teams   *teamRepoMock
 		cache   *invalidatorMock
 		wantErr error
 	}{
 		{
-			name:  "success without assignee",
-			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
-			tasks: &taskRepoMock{createID: 77, task: domain.Task{ID: 77, Title: "Fix bug"}},
-			teams: &teamRepoMock{},
-			cache: &invalidatorMock{},
+			name:   "success without assignee",
+			input:  Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
+			tasks:  &taskRepoMock{createID: 77, task: domain.Task{ID: 77, Title: "Fix bug"}},
+			access: &accessMock{},
+			teams:  &teamRepoMock{},
+			cache:  &invalidatorMock{},
 		},
 		{
-			name:  "success with assignee member",
-			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug", AssigneeID: &assignee},
-			tasks: &taskRepoMock{createID: 77, task: domain.Task{ID: 77}},
-			teams: &teamRepoMock{},
-			cache: &invalidatorMock{},
+			name:   "success with assignee member",
+			input:  Input{ActorID: 5, TeamID: 1, Title: "Fix bug", AssigneeID: &assignee},
+			tasks:  &taskRepoMock{createID: 77, task: domain.Task{ID: 77}},
+			access: &accessMock{},
+			teams:  &teamRepoMock{},
+			cache:  &invalidatorMock{},
 		},
 		{
 			name:    "empty title",
 			input:   Input{ActorID: 5, TeamID: 1, Title: ""},
 			tasks:   &taskRepoMock{},
+			access:  &accessMock{},
 			teams:   &teamRepoMock{},
 			cache:   &invalidatorMock{},
 			wantErr: domain.ErrValidation,
@@ -87,7 +97,8 @@ func TestUsecase_Handle(t *testing.T) {
 			name:    "author not a member",
 			input:   Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
 			tasks:   &taskRepoMock{},
-			teams:   &teamRepoMock{errs: map[int64]error{5: domain.ErrNotFound}},
+			access:  &accessMock{err: domain.NewPermissionDeniedError("not a member")},
+			teams:   &teamRepoMock{},
 			cache:   &invalidatorMock{},
 			wantErr: domain.ErrPermissionDenied,
 		},
@@ -95,22 +106,24 @@ func TestUsecase_Handle(t *testing.T) {
 			name:    "assignee not a member",
 			input:   Input{ActorID: 5, TeamID: 1, Title: "Fix bug", AssigneeID: &assignee},
 			tasks:   &taskRepoMock{},
+			access:  &accessMock{},
 			teams:   &teamRepoMock{errs: map[int64]error{9: domain.ErrNotFound}},
 			cache:   &invalidatorMock{},
 			wantErr: domain.ErrValidation,
 		},
 		{
-			name:  "cache invalidation failure does not fail creation",
-			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
-			tasks: &taskRepoMock{createID: 77, task: domain.Task{ID: 77}},
-			teams: &teamRepoMock{},
-			cache: &invalidatorMock{err: errors.New("redis down")},
+			name:   "cache invalidation failure does not fail creation",
+			input:  Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
+			tasks:  &taskRepoMock{createID: 77, task: domain.Task{ID: 77}},
+			access: &accessMock{},
+			teams:  &teamRepoMock{},
+			cache:  &invalidatorMock{err: errors.New("redis down")},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uc := New(tt.tasks, tt.teams, tt.cache)
+			uc := New(tt.tasks, tt.access, tt.teams, tt.cache)
 
 			out, err := uc.Handle(context.Background(), tt.input)
 
@@ -133,8 +146,7 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	assignee := int64(9)
 
 	t.Run("membership check failure", func(t *testing.T) {
-		teams := &teamRepoMock{errs: map[int64]error{5: dbErr}}
-		uc := New(&taskRepoMock{}, teams, &invalidatorMock{})
+		uc := New(&taskRepoMock{}, &accessMock{err: dbErr}, &teamRepoMock{}, &invalidatorMock{})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
@@ -142,20 +154,20 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 
 	t.Run("assignee check failure", func(t *testing.T) {
 		teams := &teamRepoMock{errs: map[int64]error{9: dbErr}}
-		uc := New(&taskRepoMock{}, teams, &invalidatorMock{})
+		uc := New(&taskRepoMock{}, &accessMock{}, teams, &invalidatorMock{})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t", AssigneeID: &assignee})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrValidation)
 	})
 
 	t.Run("create failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{createErr: dbErr}, &teamRepoMock{}, &invalidatorMock{})
+		uc := New(&taskRepoMock{createErr: dbErr}, &accessMock{}, &teamRepoMock{}, &invalidatorMock{})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
 		require.Error(t, err)
 	})
 
 	t.Run("reload failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{createID: 1, getErr: dbErr}, &teamRepoMock{}, &invalidatorMock{})
+		uc := New(&taskRepoMock{createID: 1, getErr: dbErr}, &accessMock{}, &teamRepoMock{}, &invalidatorMock{})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
 		require.Error(t, err)
 	})

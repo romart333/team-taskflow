@@ -11,22 +11,13 @@ import (
 	"team-taskflow/internal/domain"
 )
 
-type taskRepoMock struct {
+type accessMock struct {
 	task domain.Task
 	err  error
 }
 
-func (m *taskRepoMock) GetByID(context.Context, int64) (domain.Task, error) {
+func (m *accessMock) LoadTaskForMember(context.Context, int64, int64) (domain.Task, error) {
 	return m.task, m.err
-}
-
-type teamRepoMock struct{ err error }
-
-func (m *teamRepoMock) GetMember(context.Context, int64, int64) (domain.TeamMember, error) {
-	if m.err != nil {
-		return domain.TeamMember{}, m.err
-	}
-	return domain.TeamMember{Role: domain.RoleMember}, nil
 }
 
 type commentRepoMock struct {
@@ -43,7 +34,7 @@ func TestUsecase_Handle(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		expected := []domain.TaskComment{{ID: 1, TaskID: 7, Body: "hi"}}
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{}, &commentRepoMock{comments: expected})
+		uc := New(&accessMock{task: task}, &commentRepoMock{comments: expected})
 
 		out, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
@@ -52,7 +43,7 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("task not found", func(t *testing.T) {
-		uc := New(&taskRepoMock{err: domain.ErrNotFound}, &teamRepoMock{}, &commentRepoMock{})
+		uc := New(&accessMock{err: domain.NewNotFoundError("task not found")}, &commentRepoMock{})
 
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
@@ -60,7 +51,7 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("non-member is rejected", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{err: domain.ErrNotFound}, &commentRepoMock{})
+		uc := New(&accessMock{err: domain.NewPermissionDeniedError("not a member")}, &commentRepoMock{})
 
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
@@ -72,22 +63,16 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	task := domain.Task{ID: 7, TeamID: 1}
 	dbErr := errors.New("db down")
 
-	t.Run("task load failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{err: dbErr}, &teamRepoMock{}, &commentRepoMock{})
+	t.Run("access check failure", func(t *testing.T) {
+		uc := New(&accessMock{err: dbErr}, &commentRepoMock{})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrNotFound)
-	})
-
-	t.Run("membership load failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{err: dbErr}, &commentRepoMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
-		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
 	t.Run("list failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{task: task}, &teamRepoMock{}, &commentRepoMock{err: dbErr})
+		uc := New(&accessMock{task: task}, &commentRepoMock{err: dbErr})
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 		require.Error(t, err)
 	})

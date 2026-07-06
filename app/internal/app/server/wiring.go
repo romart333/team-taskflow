@@ -22,6 +22,7 @@ import (
 	teamrepo "team-taskflow/internal/repository/mysql/team"
 	userrepo "team-taskflow/internal/repository/mysql/user"
 	"team-taskflow/internal/repository/redis/taskcache"
+	"team-taskflow/internal/services/taskaccess"
 	"team-taskflow/internal/usecase/analytics_get"
 	"team-taskflow/internal/usecase/auth_login"
 	"team-taskflow/internal/usecase/auth_register"
@@ -97,21 +98,24 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 	analyticsRepository := analyticsrepo.NewRepository(pool)
 	taskListCache := taskcache.NewCache(redisClient, cfg.Cache.TaskListTTL)
 
+	// Services.
+	accessService := taskaccess.New(taskRepository, teamRepository)
+
 	// Usecases.
 	registerUsecase := auth_register.New(userRepository, passwordHasher)
 	loginUsecase := auth_login.New(userRepository, passwordHasher, jwtManager)
 	teamCreateUsecase := team_create.New(teamRepository, txManager)
 	teamListUsecase := team_list.New(teamRepository)
 	teamInviteUsecase := team_invite.New(teamRepository, userRepository, emailClient)
-	taskCreateUsecase := task_create.New(taskRepository, teamRepository, taskListCache)
-	taskListUsecase := task_list.New(taskRepository, teamRepository, taskListCache, task_list.Pagination{
+	taskCreateUsecase := task_create.New(taskRepository, accessService, teamRepository, taskListCache)
+	taskListUsecase := task_list.New(taskRepository, accessService, taskListCache, task_list.Pagination{
 		DefaultPageSize: cfg.Pagination.DefaultPageSize,
 		MaxPageSize:     cfg.Pagination.MaxPageSize,
 	})
 	taskUpdateUsecase := task_update.New(taskRepository, teamRepository, historyRepository, txManager, taskListCache)
-	taskHistoryUsecase := task_history_get.New(taskRepository, teamRepository, historyRepository)
-	commentCreateUsecase := comment_create.New(taskRepository, teamRepository, commentRepository)
-	commentListUsecase := comment_list.New(taskRepository, teamRepository, commentRepository)
+	taskHistoryUsecase := task_history_get.New(accessService, historyRepository)
+	commentCreateUsecase := comment_create.New(accessService, commentRepository)
+	commentListUsecase := comment_list.New(accessService, commentRepository)
 	analyticsUsecase := analytics_get.New(analyticsRepository)
 
 	// Delivery.

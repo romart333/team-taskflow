@@ -10,13 +10,14 @@ import (
 )
 
 type Usecase struct {
-	tasks TaskRepository
-	teams TeamRepository
-	cache TaskCacheInvalidator
+	tasks  TaskRepository
+	access TeamAccess
+	teams  TeamRepository
+	cache  TaskCacheInvalidator
 }
 
-func New(tasks TaskRepository, teams TeamRepository, cache TaskCacheInvalidator) *Usecase {
-	return &Usecase{tasks: tasks, teams: teams, cache: cache}
+func New(tasks TaskRepository, access TeamAccess, teams TeamRepository, cache TaskCacheInvalidator) *Usecase {
+	return &Usecase{tasks: tasks, access: access, teams: teams, cache: cache}
 }
 
 // Handle creates a task in a team. Both the author and the assignee (when
@@ -26,12 +27,8 @@ func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
 		return Output{}, fmt.Errorf("validating task: %w", err)
 	}
 
-	if _, err := u.teams.GetMember(ctx, in.TeamID, in.ActorID); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return Output{}, fmt.Errorf("checking author membership: %w",
-				domain.NewPermissionDeniedError("you are not a member of this team"))
-		}
-		return Output{}, fmt.Errorf("getting author membership: %w", err)
+	if err := u.access.EnsureTeamMember(ctx, in.TeamID, in.ActorID); err != nil {
+		return Output{}, fmt.Errorf("authorizing author: %w", err)
 	}
 
 	if in.AssigneeID != nil && *in.AssigneeID != in.ActorID {

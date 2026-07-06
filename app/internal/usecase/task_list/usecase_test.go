@@ -24,13 +24,10 @@ func (m *taskRepoMock) List(_ context.Context, filter domain.TaskFilter) (domain
 	return m.page, m.err
 }
 
-type teamRepoMock struct{ err error }
+type accessMock struct{ err error }
 
-func (m *teamRepoMock) GetMember(context.Context, int64, int64) (domain.TeamMember, error) {
-	if m.err != nil {
-		return domain.TeamMember{}, m.err
-	}
-	return domain.TeamMember{Role: domain.RoleMember}, nil
+func (m *accessMock) EnsureTeamMember(context.Context, int64, int64) error {
+	return m.err
 }
 
 type cacheMock struct {
@@ -64,7 +61,7 @@ func TestUsecase_Handle(t *testing.T) {
 		repo := &taskRepoMock{page: dbPage}
 		cache := &cacheMock{page: cachedPage, hit: true}
 
-		out, err := New(repo, &teamRepoMock{}, cache, pagination).
+		out, err := New(repo, &accessMock{}, cache, pagination).
 			Handle(context.Background(), Input{ActorID: 5, Filter: domain.TaskFilter{TeamID: 1}})
 
 		require.NoError(t, err)
@@ -76,7 +73,7 @@ func TestUsecase_Handle(t *testing.T) {
 		repo := &taskRepoMock{page: dbPage}
 		cache := &cacheMock{version: 7}
 
-		out, err := New(repo, &teamRepoMock{}, cache, pagination).
+		out, err := New(repo, &accessMock{}, cache, pagination).
 			Handle(context.Background(), Input{ActorID: 5, Filter: domain.TaskFilter{TeamID: 1}})
 
 		require.NoError(t, err)
@@ -91,7 +88,7 @@ func TestUsecase_Handle(t *testing.T) {
 		repo := &taskRepoMock{page: dbPage}
 		cache := &cacheMock{}
 
-		out, err := New(repo, &teamRepoMock{}, cache, pagination).
+		out, err := New(repo, &accessMock{}, cache, pagination).
 			Handle(context.Background(), Input{ActorID: 5, Filter: domain.TaskFilter{TeamID: 1, Page: 0, PageSize: 1000}})
 
 		require.NoError(t, err)
@@ -102,7 +99,7 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("non-member is rejected", func(t *testing.T) {
-		_, err := New(&taskRepoMock{}, &teamRepoMock{err: domain.ErrNotFound}, &cacheMock{}, pagination).
+		_, err := New(&taskRepoMock{}, &accessMock{err: domain.NewPermissionDeniedError("not a member")}, &cacheMock{}, pagination).
 			Handle(context.Background(), Input{ActorID: 5, Filter: domain.TaskFilter{TeamID: 1}})
 
 		require.ErrorIs(t, err, domain.ErrPermissionDenied)
@@ -112,7 +109,7 @@ func TestUsecase_Handle(t *testing.T) {
 		repo := &taskRepoMock{page: dbPage}
 		cache := &cacheMock{getErr: errors.New("redis down"), setErr: errors.New("redis down")}
 
-		out, err := New(repo, &teamRepoMock{}, cache, pagination).
+		out, err := New(repo, &accessMock{}, cache, pagination).
 			Handle(context.Background(), Input{ActorID: 5, Filter: domain.TaskFilter{TeamID: 1}})
 
 		require.NoError(t, err)
@@ -123,7 +120,7 @@ func TestUsecase_Handle(t *testing.T) {
 	t.Run("repository failure", func(t *testing.T) {
 		repo := &taskRepoMock{err: errors.New("db down")}
 
-		_, err := New(repo, &teamRepoMock{}, &cacheMock{}, pagination).
+		_, err := New(repo, &accessMock{}, &cacheMock{}, pagination).
 			Handle(context.Background(), Input{ActorID: 5, Filter: domain.TaskFilter{TeamID: 1}})
 
 		require.Error(t, err)

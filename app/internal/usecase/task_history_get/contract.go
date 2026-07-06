@@ -15,16 +15,12 @@ type Output struct {
 	Entries []domain.TaskHistoryEntry
 }
 
-// TaskRepository is the read port for tasks.
-type TaskRepository interface {
-	// GetByID returns domain.ErrNotFound when the task does not exist.
-	GetByID(ctx context.Context, taskID int64) (domain.Task, error)
-}
-
-// TeamRepository checks team memberships.
-type TeamRepository interface {
-	// GetMember returns domain.ErrNotFound when the user is not a member.
-	GetMember(ctx context.Context, teamID, userID int64) (domain.TeamMember, error)
+// TaskAccess loads a task and authorizes the actor as a member of its team.
+type TaskAccess interface {
+	// LoadTaskForMember returns a client-visible domain.ErrNotFound when the
+	// task is missing and domain.ErrPermissionDenied when the actor is not a
+	// member of the task's team.
+	LoadTaskForMember(ctx context.Context, taskID, actorID int64) (domain.Task, error)
 }
 
 // HistoryRepository is the read port for task audit entries.

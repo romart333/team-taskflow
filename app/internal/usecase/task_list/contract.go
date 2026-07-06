@@ -28,10 +28,11 @@ type TaskRepository interface {
 	List(ctx context.Context, filter domain.TaskFilter) (domain.TaskPage, error)
 }
 
-// TeamRepository checks team memberships.
-type TeamRepository interface {
-	// GetMember returns domain.ErrNotFound when the user is not a member.
-	GetMember(ctx context.Context, teamID, userID int64) (domain.TeamMember, error)
+// TeamAccess authorizes the actor as a member of a team.
+type TeamAccess interface {
+	// EnsureTeamMember returns a client-visible domain.ErrPermissionDenied
+	// when the actor is not a member of the team.
+	EnsureTeamMember(ctx context.Context, teamID, actorID int64) error
 }
 
 // TaskListCache caches task listing pages per team (best effort).
