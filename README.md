@@ -25,9 +25,9 @@ Configuration lives in `app/configs/config.yaml` (not committed; copy `app/confi
 | Command | Description |
 |---|---|
 | `make build` | Build the binary into `build/` |
-| `make test` | Linter + unit tests |
+| `make test` | Linter + race-enabled unit tests |
 | `make test-integration` | Integration tests (testcontainers, requires Docker) |
-| `make lint` | `go vet` + `golangci-lint` |
+| `make lint` | `golangci-lint` (includes `go vet`) |
 | `make up` / `make down` | Start/stop MySQL and Redis |
 
 ## API
