@@ -1,0 +1,49 @@
+template: testify
+dir: "{{.InterfaceDir}}"
+filename: "mocks_test.go"
+pkgname: "{{.SrcPackageName}}"
+structname: "{{.Mock}}{{.InterfaceName}}"
+force-file-write: true
+packages:
+  team-taskflow/internal/usecase/analytics_get:
+    config:
+      all: true
+  team-taskflow/internal/usecase/auth_login:
+    config:
+      all: true
+  team-taskflow/internal/usecase/auth_register:
+    config:
+      all: true
+  team-taskflow/internal/usecase/comment_create:
+    config:
+      all: true
+  team-taskflow/internal/usecase/comment_list:
+    config:
+      all: true
+  team-taskflow/internal/usecase/task_create:
+    config:
+      all: true
+  team-taskflow/internal/usecase/task_history_get:
+    config:
+      all: true
+  team-taskflow/internal/usecase/task_list:
+    config:
+      all: true
+  team-taskflow/internal/usecase/task_update:
+    config:
+      all: true
+  team-taskflow/internal/usecase/team_create:
+    config:
+      all: true
+  team-taskflow/internal/usecase/team_invite:
+    config:
+      all: true
+  team-taskflow/internal/usecase/team_list:
+    config:
+      all: true
+  team-taskflow/internal/services/taskaccess:
+    config:
+      all: true
+  team-taskflow/internal/delivery/http:
+    config:
+      all: true

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"team-taskflow/internal/domain"
@@ -14,106 +15,20 @@ import (
 
 var fixedNow = time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
 
-type taskRepoMock struct {
-	task      domain.Task
-	getErr    error
-	updateErr error
-	gotUpdate *domain.Task
-	lockCalls int
+// passthroughTx sets up a MockTxManager whose Do runs the callback directly,
+// mirroring the real transaction boundary without a database.
+func passthroughTx(t *testing.T) *MockTxManager {
+	t.Helper()
+	tx := NewMockTxManager(t)
+	tx.EXPECT().Do(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, fn func(context.Context) error) error { return fn(ctx) })
+	return tx
 }
 
-func (m *taskRepoMock) GetByIDForUpdate(context.Context, int64) (domain.Task, error) {
-	m.lockCalls++
-	return m.get()
-}
-
-func (m *taskRepoMock) GetByID(context.Context, int64) (domain.Task, error) {
-	return m.get()
-}
-
-func (m *taskRepoMock) get() (domain.Task, error) {
-	if m.gotUpdate != nil {
-		return *m.gotUpdate, m.getErr
-	}
-	return m.task, m.getErr
-}
-
-func (m *taskRepoMock) Update(_ context.Context, task domain.Task) error {
-	if m.updateErr == nil {
-		m.gotUpdate = &task
-	}
-	return m.updateErr
-}
-
-type accessMock struct {
-	err   error
-	calls int
-}
-
-func (m *accessMock) EnsureTeamMember(context.Context, int64, int64) error {
-	m.calls++
-	return m.err
-}
-
-type teamRepoMock struct {
-	errs  map[int64]error
-	calls int
-}
-
-func (m *teamRepoMock) GetMember(_ context.Context, _ int64, userID int64) (domain.TeamMember, error) {
-	m.calls++
-	if err, ok := m.errs[userID]; ok {
-		return domain.TeamMember{}, err
-	}
-	return domain.TeamMember{UserID: userID, Role: domain.RoleMember}, nil
-}
-
-type historyRepoMock struct {
-	entries []domain.TaskHistoryEntry
-	err     error
-}
-
-func (m *historyRepoMock) AddEntries(_ context.Context, entries []domain.TaskHistoryEntry) error {
-	m.entries = append(m.entries, entries...)
-	return m.err
-}
-
-type txMock struct{ calls int }
-
-func (m *txMock) Do(ctx context.Context, fn func(ctx context.Context) error) error {
-	m.calls++
-	return fn(ctx)
-}
-
-type invalidatorMock struct{ calls int }
-
-func (m *invalidatorMock) InvalidateTeam(context.Context, int64) error {
-	m.calls++
-	return nil
-}
-
-type fixture struct {
-	tasks   *taskRepoMock
-	access  *accessMock
-	teams   *teamRepoMock
-	history *historyRepoMock
-	tx      *txMock
-	cache   *invalidatorMock
-}
-
-func newFixture(task domain.Task) *fixture {
-	return &fixture{
-		tasks:   &taskRepoMock{task: task},
-		access:  &accessMock{},
-		teams:   &teamRepoMock{},
-		history: &historyRepoMock{},
-		tx:      &txMock{},
-		cache:   &invalidatorMock{},
-	}
-}
-
-func (f *fixture) usecase() *Usecase {
-	return New(f.tasks, f.access, f.teams, f.history, f.tx, f.cache, func() time.Time { return fixedNow })
+func newUsecase(
+	tasks TaskRepository, access TeamAccess, history HistoryRepository, tx TxManager, cache TaskCacheInvalidator,
+) *Usecase {
+	return New(tasks, access, history, tx, cache, func() time.Time { return fixedNow })
 }
 
 func TestUsecase_Handle(t *testing.T) {
@@ -123,9 +38,33 @@ func TestUsecase_Handle(t *testing.T) {
 	}
 
 	t.Run("changes are read, written and audited inside one transaction", func(t *testing.T) {
-		f := newFixture(baseTask)
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
 
-		out, err := f.usecase().Handle(context.Background(), Input{
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil).Once()
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+
+		var gotUpdate domain.Task
+		tasks.EXPECT().Update(mock.Anything, mock.MatchedBy(func(task domain.Task) bool {
+			return task.Title == "New title" && task.Status == domain.TaskStatusDone
+		})).Run(func(_ context.Context, task domain.Task) { gotUpdate = task }).Return(nil)
+
+		history.EXPECT().AddEntries(mock.Anything, mock.MatchedBy(func(entries []domain.TaskHistoryEntry) bool {
+			return assert.ObjectsAreEqual([]domain.TaskHistoryEntry{
+				{TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldTitle, OldValue: "Old title", NewValue: "New title"},
+				{TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldStatus, OldValue: "todo", NewValue: "done"},
+			}, entries)
+		})).Return(nil)
+
+		tasks.EXPECT().GetByID(mock.Anything, int64(7)).RunAndReturn(
+			func(context.Context, int64) (domain.Task, error) { return gotUpdate, nil },
+		)
+		cache.EXPECT().InvalidateTeam(mock.Anything, int64(1)).Return(nil).Once()
+
+		out, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7,
 			Title:  new("New title"),
 			Status: new("done"),
@@ -136,39 +75,36 @@ func TestUsecase_Handle(t *testing.T) {
 		assert.Equal(t, domain.TaskStatusDone, out.Task.Status)
 		require.NotNil(t, out.Task.CompletedAt, "completion must be stamped on the move into done")
 		assert.Equal(t, fixedNow, *out.Task.CompletedAt)
-		assert.Equal(t, 1, f.tx.calls)
-		assert.Equal(t, 1, f.tasks.lockCalls, "snapshot must be read with a row lock")
-		assert.Equal(t, 1, f.cache.calls)
-		require.Len(t, f.history.entries, 2)
-		assert.Equal(t, domain.TaskHistoryEntry{
-			TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldTitle,
-			OldValue: "Old title", NewValue: "New title",
-		}, f.history.entries[0])
-		assert.Equal(t, domain.TaskHistoryEntry{
-			TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldStatus,
-			OldValue: "todo", NewValue: "done",
-		}, f.history.entries[1])
 	})
 
 	t.Run("no-op update writes no history and keeps the cache", func(t *testing.T) {
-		f := newFixture(baseTask)
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
 
-		out, err := f.usecase().Handle(context.Background(), Input{
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+
+		out, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7, Title: new("Old title"),
 		})
 
 		require.NoError(t, err)
 		assert.Equal(t, baseTask, out.Task)
-		assert.Nil(t, f.tasks.gotUpdate, "no write must happen")
-		assert.Empty(t, f.history.entries)
-		assert.Zero(t, f.cache.calls)
 	})
 
 	t.Run("task not found", func(t *testing.T) {
-		f := newFixture(baseTask)
-		f.tasks = &taskRepoMock{getErr: domain.ErrNotFound}
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
 
-		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(domain.Task{}, domain.ErrNotFound)
+
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
 		require.ErrorIs(t, err, domain.ErrNotFound)
 		var safeErr *domain.SafeError
@@ -177,28 +113,54 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("non-member is rejected", func(t *testing.T) {
-		f := newFixture(baseTask)
-		f.access = &accessMock{err: domain.NewPermissionDeniedError("not a member")}
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
 
-		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).
+			Return(domain.NewPermissionDeniedError("not a member"))
+
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, Title: new("x"),
+		})
 
 		require.ErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
 	t.Run("invalid status", func(t *testing.T) {
-		f := newFixture(baseTask)
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
 
-		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Status: new("archived")})
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, Status: new("archived"),
+		})
 
 		require.ErrorIs(t, err, domain.ErrValidation)
 	})
 
 	t.Run("assignee outside the team", func(t *testing.T) {
 		outsider := int64(99)
-		f := newFixture(baseTask)
-		f.teams = &teamRepoMock{errs: map[int64]error{99: domain.ErrNotFound}}
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
 
-		_, err := f.usecase().Handle(context.Background(), Input{
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+		access.EXPECT().EnsureAssigneeMember(mock.Anything, int64(1), outsider).
+			Return(domain.NewValidationError("assignee is not a member of this team"))
+
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: &outsider,
 		})
 
@@ -209,52 +171,94 @@ func TestUsecase_Handle(t *testing.T) {
 		member := int64(9)
 		assigned := baseTask
 		assigned.AssigneeID = &member
-		f := newFixture(assigned)
 
-		out, err := f.usecase().Handle(context.Background(), Input{
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(assigned, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+
+		var gotUpdate domain.Task
+		tasks.EXPECT().Update(mock.Anything, mock.MatchedBy(func(task domain.Task) bool {
+			return task.AssigneeID == nil
+		})).Run(func(_ context.Context, task domain.Task) { gotUpdate = task }).Return(nil)
+
+		history.EXPECT().AddEntries(mock.Anything, []domain.TaskHistoryEntry{
+			{TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldAssignee, OldValue: "9", NewValue: ""},
+		}).Return(nil)
+
+		tasks.EXPECT().GetByID(mock.Anything, int64(7)).RunAndReturn(
+			func(context.Context, int64) (domain.Task, error) { return gotUpdate, nil },
+		)
+		cache.EXPECT().InvalidateTeam(mock.Anything, int64(1)).Return(nil)
+
+		out, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: nil,
 		})
 
 		require.NoError(t, err)
 		assert.Nil(t, out.Task.AssigneeID)
-		require.Len(t, f.history.entries, 1)
-		assert.Equal(t, domain.TaskHistoryEntry{
-			TaskID: 7, ChangedBy: 5, Field: domain.TaskFieldAssignee,
-			OldValue: "9", NewValue: "",
-		}, f.history.entries[0])
 	})
 
 	t.Run("absent assignee field leaves the assignee unchanged", func(t *testing.T) {
 		member := int64(9)
 		assigned := baseTask
 		assigned.AssigneeID = &member
-		f := newFixture(assigned)
 
-		out, err := f.usecase().Handle(context.Background(), Input{
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(assigned, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+
+		var gotUpdate domain.Task
+		tasks.EXPECT().Update(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, task domain.Task) { gotUpdate = task }).Return(nil)
+		history.EXPECT().AddEntries(mock.Anything, mock.Anything).Return(nil)
+		tasks.EXPECT().GetByID(mock.Anything, int64(7)).RunAndReturn(
+			func(context.Context, int64) (domain.Task, error) { return gotUpdate, nil },
+		)
+		cache.EXPECT().InvalidateTeam(mock.Anything, int64(1)).Return(nil)
+
+		// No EnsureAssigneeMember expectation: it must not be called.
+		out, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7, Title: new("New title"),
 		})
 
 		require.NoError(t, err)
 		require.NotNil(t, out.Task.AssigneeID)
 		assert.Equal(t, member, *out.Task.AssigneeID)
-		assert.Zero(t, f.teams.calls, "no assignee membership lookup expected")
 	})
 
 	t.Run("re-assigning the same member skips the membership lookup", func(t *testing.T) {
 		member := int64(9)
 		assigned := baseTask
 		assigned.AssigneeID = &member
-		f := newFixture(assigned)
 
-		out, err := f.usecase().Handle(context.Background(), Input{
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(assigned, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+
+		// No EnsureAssigneeMember, Update, AddEntries or InvalidateTeam
+		// expectations: re-assigning the same member is a no-op change.
+		out, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: &member,
 		})
 
 		require.NoError(t, err)
 		require.NotNil(t, out.Task.AssigneeID)
 		assert.Equal(t, member, *out.Task.AssigneeID)
-		assert.Zero(t, f.teams.calls, "unchanged assignee must not be re-validated")
-		assert.Empty(t, f.history.entries)
 	})
 }
 
@@ -263,18 +267,35 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	dbErr := errors.New("db down")
 
 	t.Run("membership check failure", func(t *testing.T) {
-		f := newFixture(baseTask)
-		f.access = &accessMock{err: dbErr}
-		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(dbErr)
+
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, Title: new("x"),
+		})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
 	t.Run("assignee check failure", func(t *testing.T) {
 		outsider := int64(99)
-		f := newFixture(baseTask)
-		f.teams = &teamRepoMock{errs: map[int64]error{99: dbErr}}
-		_, err := f.usecase().Handle(context.Background(), Input{
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+		access.EXPECT().EnsureAssigneeMember(mock.Anything, int64(1), outsider).Return(dbErr)
+
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
 			ActorID: 5, TaskID: 7, SetAssignee: true, AssigneeID: &outsider,
 		})
 		require.Error(t, err)
@@ -282,27 +303,71 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	})
 
 	t.Run("update failure rolls back and skips history and cache", func(t *testing.T) {
-		f := newFixture(baseTask)
-		f.tasks = &taskRepoMock{task: baseTask, updateErr: dbErr}
-		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+		tasks.EXPECT().Update(mock.Anything, mock.Anything).Return(dbErr)
+
+		// No AddEntries or InvalidateTeam expectations: a failed write must
+		// not be audited or invalidate the cache.
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, Title: new("x"),
+		})
 		require.Error(t, err)
-		assert.Empty(t, f.history.entries)
-		assert.Zero(t, f.cache.calls)
 	})
 
 	t.Run("history write failure", func(t *testing.T) {
-		f := newFixture(baseTask)
-		f.history = &historyRepoMock{err: dbErr}
-		_, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Title: new("x")})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+		tasks.EXPECT().Update(mock.Anything, mock.Anything).Return(nil)
+		history.EXPECT().AddEntries(mock.Anything, mock.Anything).Return(dbErr)
+
+		_, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, Title: new("x"),
+		})
 		require.Error(t, err)
 	})
 
 	t.Run("description change is audited", func(t *testing.T) {
-		f := newFixture(baseTask)
-		out, err := f.usecase().Handle(context.Background(), Input{ActorID: 5, TaskID: 7, Description: new("new desc")})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		history := NewMockHistoryRepository(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		tx := passthroughTx(t)
+
+		tasks.EXPECT().GetByIDForUpdate(mock.Anything, int64(7)).Return(baseTask, nil)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+
+		var gotUpdate domain.Task
+		tasks.EXPECT().Update(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, task domain.Task) { gotUpdate = task }).Return(nil)
+		var gotEntries []domain.TaskHistoryEntry
+		history.EXPECT().AddEntries(mock.Anything, mock.MatchedBy(func(entries []domain.TaskHistoryEntry) bool {
+			gotEntries = entries
+			return true
+		})).Return(nil)
+		tasks.EXPECT().GetByID(mock.Anything, int64(7)).RunAndReturn(
+			func(context.Context, int64) (domain.Task, error) { return gotUpdate, nil },
+		)
+		cache.EXPECT().InvalidateTeam(mock.Anything, int64(1)).Return(nil)
+
+		out, err := newUsecase(tasks, access, history, tx, cache).Handle(context.Background(), Input{
+			ActorID: 5, TaskID: 7, Description: new("new desc"),
+		})
 		require.NoError(t, err)
 		assert.Equal(t, "new desc", out.Task.Description)
-		require.Len(t, f.history.entries, 1)
-		assert.Equal(t, domain.TaskFieldDescription, f.history.entries[0].Field)
+		require.Len(t, gotEntries, 1)
+		assert.Equal(t, domain.TaskFieldDescription, gotEntries[0].Field)
 	})
 }

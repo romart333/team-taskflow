@@ -6,36 +6,23 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"team-taskflow/internal/domain"
 )
 
-type accessMock struct {
-	task domain.Task
-	err  error
-}
-
-func (m *accessMock) LoadTaskForMember(context.Context, int64, int64) (domain.Task, error) {
-	return m.task, m.err
-}
-
-type historyRepoMock struct {
-	entries []domain.TaskHistoryEntry
-	err     error
-}
-
-func (m *historyRepoMock) ListByTask(context.Context, int64) ([]domain.TaskHistoryEntry, error) {
-	return m.entries, m.err
-}
-
 func TestUsecase_Handle(t *testing.T) {
 	task := domain.Task{ID: 7, TeamID: 1}
 
 	t.Run("success", func(t *testing.T) {
+		access := NewMockTaskAccess(t)
+		history := NewMockHistoryRepository(t)
 		expected := []domain.TaskHistoryEntry{{ID: 1, TaskID: 7, Field: domain.TaskFieldStatus}}
-		uc := New(&accessMock{task: task}, &historyRepoMock{entries: expected})
+		access.EXPECT().LoadTaskForMember(mock.Anything, int64(7), int64(5)).Return(task, nil)
+		history.EXPECT().ListByTask(mock.Anything, int64(7)).Return(expected, nil)
 
+		uc := New(access, history)
 		out, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
 		require.NoError(t, err)
@@ -43,16 +30,24 @@ func TestUsecase_Handle(t *testing.T) {
 	})
 
 	t.Run("task not found", func(t *testing.T) {
-		uc := New(&accessMock{err: domain.NewNotFoundError("task not found")}, &historyRepoMock{})
+		access := NewMockTaskAccess(t)
+		history := NewMockHistoryRepository(t)
+		access.EXPECT().LoadTaskForMember(mock.Anything, int64(7), int64(5)).
+			Return(domain.Task{}, domain.NewNotFoundError("task not found"))
 
+		uc := New(access, history)
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
 		require.ErrorIs(t, err, domain.ErrNotFound)
 	})
 
 	t.Run("non-member is rejected", func(t *testing.T) {
-		uc := New(&accessMock{err: domain.NewPermissionDeniedError("not a member")}, &historyRepoMock{})
+		access := NewMockTaskAccess(t)
+		history := NewMockHistoryRepository(t)
+		access.EXPECT().LoadTaskForMember(mock.Anything, int64(7), int64(5)).
+			Return(domain.Task{}, domain.NewPermissionDeniedError("not a member"))
 
+		uc := New(access, history)
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 
 		require.ErrorIs(t, err, domain.ErrPermissionDenied)
@@ -64,14 +59,23 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	dbErr := errors.New("db down")
 
 	t.Run("access check failure", func(t *testing.T) {
-		uc := New(&accessMock{err: dbErr}, &historyRepoMock{})
+		access := NewMockTaskAccess(t)
+		history := NewMockHistoryRepository(t)
+		access.EXPECT().LoadTaskForMember(mock.Anything, int64(7), int64(5)).Return(domain.Task{}, dbErr)
+
+		uc := New(access, history)
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrNotFound)
 	})
 
 	t.Run("history load failure", func(t *testing.T) {
-		uc := New(&accessMock{task: task}, &historyRepoMock{err: dbErr})
+		access := NewMockTaskAccess(t)
+		history := NewMockHistoryRepository(t)
+		access.EXPECT().LoadTaskForMember(mock.Anything, int64(7), int64(5)).Return(task, nil)
+		history.EXPECT().ListByTask(mock.Anything, int64(7)).Return(nil, dbErr)
+
+		uc := New(access, history)
 		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TaskID: 7})
 		require.Error(t, err)
 	})

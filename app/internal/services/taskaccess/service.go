@@ -43,6 +43,20 @@ func (s *Service) EnsureTeamMember(ctx context.Context, teamID, actorID int64) e
 	return nil
 }
 
+// EnsureAssigneeMember maps a missing membership to a client-visible
+// validation error: a non-member assignee is bad input from the actor, not a
+// permission problem of the assignee.
+func (s *Service) EnsureAssigneeMember(ctx context.Context, teamID, assigneeID int64) error {
+	if _, err := s.teams.GetMember(ctx, teamID, assigneeID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("checking assignee membership: %w",
+				domain.NewValidationError("assignee is not a member of this team"))
+		}
+		return fmt.Errorf("getting assignee membership: %w", err)
+	}
+	return nil
+}
+
 // LoadTaskForMember loads a task and authorizes the actor as a member of the
 // task's team, mapping a missing task to a client-visible not-found error.
 func (s *Service) LoadTaskForMember(ctx context.Context, taskID, actorID int64) (domain.Task, error) {

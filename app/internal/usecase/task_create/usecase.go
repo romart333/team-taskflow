@@ -2,7 +2,6 @@ package task_create
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
@@ -12,12 +11,11 @@ import (
 type Usecase struct {
 	tasks  TaskRepository
 	access TeamAccess
-	teams  TeamRepository
 	cache  TaskCacheInvalidator
 }
 
-func New(tasks TaskRepository, access TeamAccess, teams TeamRepository, cache TaskCacheInvalidator) *Usecase {
-	return &Usecase{tasks: tasks, access: access, teams: teams, cache: cache}
+func New(tasks TaskRepository, access TeamAccess, cache TaskCacheInvalidator) *Usecase {
+	return &Usecase{tasks: tasks, access: access, cache: cache}
 }
 
 // Handle creates a task in a team. Both the author and the assignee (when
@@ -32,12 +30,8 @@ func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
 	}
 
 	if in.AssigneeID != nil && *in.AssigneeID != in.ActorID {
-		if _, err := u.teams.GetMember(ctx, in.TeamID, *in.AssigneeID); err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				return Output{}, fmt.Errorf("checking assignee membership: %w",
-					domain.NewValidationError("assignee is not a member of this team"))
-			}
-			return Output{}, fmt.Errorf("getting assignee membership: %w", err)
+		if err := u.access.EnsureAssigneeMember(ctx, in.TeamID, *in.AssigneeID); err != nil {
+			return Output{}, fmt.Errorf("authorizing assignee: %w", err)
 		}
 	}
 

@@ -13,7 +13,6 @@ import (
 type Usecase struct {
 	tasks   TaskRepository
 	access  TeamAccess
-	teams   TeamRepository
 	history HistoryRepository
 	tx      TxManager
 	cache   TaskCacheInvalidator
@@ -23,13 +22,12 @@ type Usecase struct {
 func New(
 	tasks TaskRepository,
 	access TeamAccess,
-	teams TeamRepository,
 	history HistoryRepository,
 	tx TxManager,
 	cache TaskCacheInvalidator,
 	now func() time.Time,
 ) *Usecase {
-	return &Usecase{tasks: tasks, access: access, teams: teams, history: history, tx: tx, cache: cache, now: now}
+	return &Usecase{tasks: tasks, access: access, history: history, tx: tx, cache: cache, now: now}
 }
 
 // Handle updates a task on behalf of a team member and records every field
@@ -133,13 +131,11 @@ func (u *Usecase) applyChanges(ctx context.Context, current domain.Task, in Inpu
 		updated.ChangeStatus(status, u.now())
 	}
 	if in.SetAssignee {
+		// The check is skipped when the assignee stays the same: the current
+		// value was already validated when it was set.
 		if in.AssigneeID != nil && !sameAssignee(current.AssigneeID, in.AssigneeID) {
-			if _, err := u.teams.GetMember(ctx, current.TeamID, *in.AssigneeID); err != nil {
-				if errors.Is(err, domain.ErrNotFound) {
-					return domain.Task{}, fmt.Errorf("checking assignee membership: %w",
-						domain.NewValidationError("assignee is not a member of this team"))
-				}
-				return domain.Task{}, fmt.Errorf("getting assignee membership: %w", err)
+			if err := u.access.EnsureAssigneeMember(ctx, current.TeamID, *in.AssigneeID); err != nil {
+				return domain.Task{}, fmt.Errorf("authorizing assignee: %w", err)
 			}
 		}
 		updated.AssigneeID = in.AssigneeID

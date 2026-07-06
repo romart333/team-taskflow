@@ -108,12 +108,12 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 	teamCreateUsecase := team_create.New(teamRepository, txManager)
 	teamListUsecase := team_list.New(teamRepository)
 	teamInviteUsecase := team_invite.New(teamRepository, userRepository, emailClient)
-	taskCreateUsecase := task_create.New(taskRepository, accessService, teamRepository, taskListCache)
+	taskCreateUsecase := task_create.New(taskRepository, accessService, taskListCache)
 	taskListUsecase := task_list.New(taskRepository, accessService, taskListCache, task_list.Pagination{
 		DefaultPageSize: cfg.Pagination.DefaultPageSize,
 		MaxPageSize:     cfg.Pagination.MaxPageSize,
 	})
-	taskUpdateUsecase := task_update.New(taskRepository, accessService, teamRepository, historyRepository, txManager, taskListCache, time.Now)
+	taskUpdateUsecase := task_update.New(taskRepository, accessService, historyRepository, txManager, taskListCache, time.Now)
 	taskHistoryUsecase := task_history_get.New(accessService, historyRepository)
 	commentCreateUsecase := comment_create.New(accessService, commentRepository)
 	commentListUsecase := comment_list.New(accessService, commentRepository)

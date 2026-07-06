@@ -1,7 +1,7 @@
 APP_DIR := app
 BUILD_DIR := build
 
-.PHONY: build run test test-unit test-integration lint up down tidy
+.PHONY: build run test test-unit test-integration lint up down tidy generate
 
 build:
 	cd $(APP_DIR) && go build -o ../$(BUILD_DIR)/server ./cmd/server
@@ -31,3 +31,6 @@ down:
 
 tidy:
 	cd $(APP_DIR) && go mod tidy
+
+generate:
+	cd $(APP_DIR) && go tool mockery

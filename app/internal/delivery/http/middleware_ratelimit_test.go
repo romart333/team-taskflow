@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -9,21 +8,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"team-taskflow/internal/lib/authctx"
 )
-
-type limiterMock struct {
-	allowed    bool
-	retryAfter time.Duration
-	err        error
-	gotKey     string
-}
-
-func (m *limiterMock) Allow(_ context.Context, key string) (bool, time.Duration, error) {
-	m.gotKey = key
-	return m.allowed, m.retryAfter, m.err
-}
 
 func okHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -33,7 +21,8 @@ func okHandler() http.Handler {
 
 func TestRateLimitMiddleware(t *testing.T) {
 	t.Run("allowed request passes through with user key", func(t *testing.T) {
-		limiter := &limiterMock{allowed: true}
+		limiter := newMockrateLimiter(t)
+		limiter.EXPECT().Allow(mock.Anything, "user:42").Return(true, time.Duration(0), nil)
 		handler := NewRateLimitMiddleware(limiter)(okHandler())
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -43,11 +32,11 @@ func TestRateLimitMiddleware(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.Equal(t, "user:42", limiter.gotKey)
 	})
 
 	t.Run("anonymous request is keyed by IP", func(t *testing.T) {
-		limiter := &limiterMock{allowed: true}
+		limiter := newMockrateLimiter(t)
+		limiter.EXPECT().Allow(mock.Anything, "ip:192.0.2.10").Return(true, time.Duration(0), nil)
 		handler := NewRateLimitMiddleware(limiter)(okHandler())
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -57,11 +46,11 @@ func TestRateLimitMiddleware(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.Equal(t, "ip:192.0.2.10", limiter.gotKey)
 	})
 
 	t.Run("denied request gets 429 with Retry-After", func(t *testing.T) {
-		limiter := &limiterMock{allowed: false, retryAfter: 42 * time.Second}
+		limiter := newMockrateLimiter(t)
+		limiter.EXPECT().Allow(mock.Anything, mock.Anything).Return(false, 42*time.Second, nil)
 		handler := NewRateLimitMiddleware(limiter)(okHandler())
 
 		rec := httptest.NewRecorder()
@@ -73,7 +62,8 @@ func TestRateLimitMiddleware(t *testing.T) {
 	})
 
 	t.Run("limiter outage fails open", func(t *testing.T) {
-		limiter := &limiterMock{err: errors.New("redis down")}
+		limiter := newMockrateLimiter(t)
+		limiter.EXPECT().Allow(mock.Anything, mock.Anything).Return(false, time.Duration(0), errors.New("redis down"))
 		handler := NewRateLimitMiddleware(limiter)(okHandler())
 
 		rec := httptest.NewRecorder()

@@ -25,17 +25,14 @@ type TaskRepository interface {
 	GetByID(ctx context.Context, taskID int64) (domain.Task, error)
 }
 
-// TeamAccess authorizes the actor as a member of a team.
+// TeamAccess authorizes team memberships of the actor and the assignee.
 type TeamAccess interface {
 	// EnsureTeamMember returns a client-visible domain.ErrPermissionDenied
 	// when the actor is not a member of the team.
 	EnsureTeamMember(ctx context.Context, teamID, actorID int64) error
-}
-
-// TeamRepository checks team memberships (used to validate the assignee).
-type TeamRepository interface {
-	// GetMember returns domain.ErrNotFound when the user is not a member.
-	GetMember(ctx context.Context, teamID, userID int64) (domain.TeamMember, error)
+	// EnsureAssigneeMember returns a client-visible domain.ErrValidation
+	// when the assignee is not a member of the team.
+	EnsureAssigneeMember(ctx context.Context, teamID, assigneeID int64) error
 }
 
 // TaskCacheInvalidator drops cached task listings of a team (best effort).

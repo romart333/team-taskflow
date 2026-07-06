@@ -6,137 +6,99 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"team-taskflow/internal/domain"
 )
 
-type taskRepoMock struct {
-	createID  int64
-	createErr error
-	task      domain.Task
-	getErr    error
-	gotTask   domain.Task
-}
-
-func (m *taskRepoMock) Create(_ context.Context, task domain.Task) (int64, error) {
-	m.gotTask = task
-	return m.createID, m.createErr
-}
-
-func (m *taskRepoMock) GetByID(context.Context, int64) (domain.Task, error) {
-	return m.task, m.getErr
-}
-
-type teamRepoMock struct {
-	// membership err per user id
-	errs map[int64]error
-}
-
-func (m *teamRepoMock) GetMember(_ context.Context, _ int64, userID int64) (domain.TeamMember, error) {
-	if err, ok := m.errs[userID]; ok {
-		return domain.TeamMember{}, err
-	}
-	return domain.TeamMember{UserID: userID, Role: domain.RoleMember}, nil
-}
-
-type accessMock struct{ err error }
-
-func (m *accessMock) EnsureTeamMember(context.Context, int64, int64) error {
-	return m.err
-}
-
-type invalidatorMock struct {
-	err   error
-	calls int
-}
-
-func (m *invalidatorMock) InvalidateTeam(context.Context, int64) error {
-	m.calls++
-	return m.err
-}
-
 func TestUsecase_Handle(t *testing.T) {
 	assignee := int64(9)
+	created := domain.Task{ID: 77, Title: "Fix bug"}
 
 	tests := []struct {
 		name    string
 		input   Input
-		tasks   *taskRepoMock
-		access  *accessMock
-		teams   *teamRepoMock
-		cache   *invalidatorMock
+		setup   func(tasks *MockTaskRepository, access *MockTeamAccess, cache *MockTaskCacheInvalidator)
 		wantErr error
 	}{
 		{
-			name:   "success without assignee",
-			input:  Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
-			tasks:  &taskRepoMock{createID: 77, task: domain.Task{ID: 77, Title: "Fix bug"}},
-			access: &accessMock{},
-			teams:  &teamRepoMock{},
-			cache:  &invalidatorMock{},
+			name:  "success without assignee",
+			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
+			setup: func(tasks *MockTaskRepository, access *MockTeamAccess, cache *MockTaskCacheInvalidator) {
+				access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+				tasks.EXPECT().Create(mock.Anything, mock.MatchedBy(func(task domain.Task) bool {
+					return task.Status == domain.TaskStatusTodo && task.CreatedBy == 5
+				})).Return(77, nil)
+				tasks.EXPECT().GetByID(mock.Anything, int64(77)).Return(created, nil)
+				cache.EXPECT().InvalidateTeam(mock.Anything, int64(1)).Return(nil)
+			},
 		},
 		{
-			name:   "success with assignee member",
-			input:  Input{ActorID: 5, TeamID: 1, Title: "Fix bug", AssigneeID: &assignee},
-			tasks:  &taskRepoMock{createID: 77, task: domain.Task{ID: 77}},
-			access: &accessMock{},
-			teams:  &teamRepoMock{},
-			cache:  &invalidatorMock{},
+			name:  "success with assignee member",
+			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug", AssigneeID: &assignee},
+			setup: func(tasks *MockTaskRepository, access *MockTeamAccess, cache *MockTaskCacheInvalidator) {
+				access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+				access.EXPECT().EnsureAssigneeMember(mock.Anything, int64(1), assignee).Return(nil)
+				tasks.EXPECT().Create(mock.Anything, mock.Anything).Return(77, nil)
+				tasks.EXPECT().GetByID(mock.Anything, int64(77)).Return(created, nil)
+				cache.EXPECT().InvalidateTeam(mock.Anything, int64(1)).Return(nil)
+			},
 		},
 		{
 			name:    "empty title",
 			input:   Input{ActorID: 5, TeamID: 1, Title: ""},
-			tasks:   &taskRepoMock{},
-			access:  &accessMock{},
-			teams:   &teamRepoMock{},
-			cache:   &invalidatorMock{},
 			wantErr: domain.ErrValidation,
 		},
 		{
-			name:    "author not a member",
-			input:   Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
-			tasks:   &taskRepoMock{},
-			access:  &accessMock{err: domain.NewPermissionDeniedError("not a member")},
-			teams:   &teamRepoMock{},
-			cache:   &invalidatorMock{},
+			name:  "author not a member",
+			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
+			setup: func(tasks *MockTaskRepository, access *MockTeamAccess, cache *MockTaskCacheInvalidator) {
+				access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).
+					Return(domain.NewPermissionDeniedError("not a member"))
+			},
 			wantErr: domain.ErrPermissionDenied,
 		},
 		{
-			name:    "assignee not a member",
-			input:   Input{ActorID: 5, TeamID: 1, Title: "Fix bug", AssigneeID: &assignee},
-			tasks:   &taskRepoMock{},
-			access:  &accessMock{},
-			teams:   &teamRepoMock{errs: map[int64]error{9: domain.ErrNotFound}},
-			cache:   &invalidatorMock{},
+			name:  "assignee not a member",
+			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug", AssigneeID: &assignee},
+			setup: func(tasks *MockTaskRepository, access *MockTeamAccess, cache *MockTaskCacheInvalidator) {
+				access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+				access.EXPECT().EnsureAssigneeMember(mock.Anything, int64(1), assignee).
+					Return(domain.NewValidationError("assignee is not a member of this team"))
+			},
 			wantErr: domain.ErrValidation,
 		},
 		{
-			name:   "cache invalidation failure does not fail creation",
-			input:  Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
-			tasks:  &taskRepoMock{createID: 77, task: domain.Task{ID: 77}},
-			access: &accessMock{},
-			teams:  &teamRepoMock{},
-			cache:  &invalidatorMock{err: errors.New("redis down")},
+			name:  "cache invalidation failure does not fail creation",
+			input: Input{ActorID: 5, TeamID: 1, Title: "Fix bug"},
+			setup: func(tasks *MockTaskRepository, access *MockTeamAccess, cache *MockTaskCacheInvalidator) {
+				access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+				tasks.EXPECT().Create(mock.Anything, mock.Anything).Return(77, nil)
+				tasks.EXPECT().GetByID(mock.Anything, int64(77)).Return(created, nil)
+				cache.EXPECT().InvalidateTeam(mock.Anything, int64(1)).Return(errors.New("redis down"))
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uc := New(tt.tasks, tt.access, tt.teams, tt.cache)
+			tasks := NewMockTaskRepository(t)
+			access := NewMockTeamAccess(t)
+			cache := NewMockTaskCacheInvalidator(t)
+			if tt.setup != nil {
+				tt.setup(tasks, access, cache)
+			}
+			uc := New(tasks, access, cache)
 
 			out, err := uc.Handle(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
 				require.ErrorIs(t, err, tt.wantErr)
-				assert.Zero(t, tt.tasks.gotTask, "task must not be created on failure")
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tt.tasks.task, out.Task)
-			assert.Equal(t, domain.TaskStatusTodo, tt.tasks.gotTask.Status)
-			assert.Equal(t, int64(5), tt.tasks.gotTask.CreatedBy)
-			assert.Equal(t, 1, tt.cache.calls)
+			assert.Equal(t, created, out.Task)
 		})
 	}
 }
@@ -146,29 +108,48 @@ func TestUsecase_Handle_RepositoryFailures(t *testing.T) {
 	assignee := int64(9)
 
 	t.Run("membership check failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{}, &accessMock{err: dbErr}, &teamRepoMock{}, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(dbErr)
+
+		_, err := New(tasks, access, cache).Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrPermissionDenied)
 	})
 
 	t.Run("assignee check failure", func(t *testing.T) {
-		teams := &teamRepoMock{errs: map[int64]error{9: dbErr}}
-		uc := New(&taskRepoMock{}, &accessMock{}, teams, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t", AssigneeID: &assignee})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+		access.EXPECT().EnsureAssigneeMember(mock.Anything, int64(1), assignee).Return(dbErr)
+
+		_, err := New(tasks, access, cache).Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t", AssigneeID: &assignee})
 		require.Error(t, err)
 		require.NotErrorIs(t, err, domain.ErrValidation)
 	})
 
 	t.Run("create failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{createErr: dbErr}, &accessMock{}, &teamRepoMock{}, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+		tasks.EXPECT().Create(mock.Anything, mock.Anything).Return(0, dbErr)
+
+		_, err := New(tasks, access, cache).Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
 		require.Error(t, err)
 	})
 
 	t.Run("reload failure", func(t *testing.T) {
-		uc := New(&taskRepoMock{createID: 1, getErr: dbErr}, &accessMock{}, &teamRepoMock{}, &invalidatorMock{})
-		_, err := uc.Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
+		tasks := NewMockTaskRepository(t)
+		access := NewMockTeamAccess(t)
+		cache := NewMockTaskCacheInvalidator(t)
+		access.EXPECT().EnsureTeamMember(mock.Anything, int64(1), int64(5)).Return(nil)
+		tasks.EXPECT().Create(mock.Anything, mock.Anything).Return(1, nil)
+		tasks.EXPECT().GetByID(mock.Anything, int64(1)).Return(domain.Task{}, dbErr)
+
+		_, err := New(tasks, access, cache).Handle(context.Background(), Input{ActorID: 5, TeamID: 1, Title: "t"})
 		require.Error(t, err)
 	})
 }
