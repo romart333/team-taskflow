@@ -26,8 +26,7 @@ func (r *Repository) TeamStats(ctx context.Context, actorID int64, doneWindowDay
 		       t.name,
 		       COUNT(DISTINCT tm.user_id) AS member_count,
 		       COUNT(DISTINCT CASE
-		           WHEN ta.status = 'done'
-		            AND ta.updated_at >= NOW() - INTERVAL ? DAY
+		           WHEN ta.completed_at >= NOW() - INTERVAL ? DAY
 		           THEN ta.id END) AS done_tasks
 		FROM teams t
 		LEFT JOIN team_members tm ON tm.team_id = t.id

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
 	"github.com/avito-tech/go-transaction-manager/trm/v2/manager"
@@ -112,7 +113,7 @@ func buildDependencies(ctx context.Context, cfg Config) (*dependencies, error) {
 		DefaultPageSize: cfg.Pagination.DefaultPageSize,
 		MaxPageSize:     cfg.Pagination.MaxPageSize,
 	})
-	taskUpdateUsecase := task_update.New(taskRepository, accessService, teamRepository, historyRepository, txManager, taskListCache)
+	taskUpdateUsecase := task_update.New(taskRepository, accessService, teamRepository, historyRepository, txManager, taskListCache, time.Now)
 	taskHistoryUsecase := task_history_get.New(accessService, historyRepository)
 	commentCreateUsecase := comment_create.New(accessService, commentRepository)
 	commentListUsecase := comment_list.New(accessService, commentRepository)

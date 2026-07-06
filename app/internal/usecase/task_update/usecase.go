@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"team-taskflow/internal/domain"
 )
@@ -16,6 +17,7 @@ type Usecase struct {
 	history HistoryRepository
 	tx      TxManager
 	cache   TaskCacheInvalidator
+	now     func() time.Time
 }
 
 func New(
@@ -25,8 +27,9 @@ func New(
 	history HistoryRepository,
 	tx TxManager,
 	cache TaskCacheInvalidator,
+	now func() time.Time,
 ) *Usecase {
-	return &Usecase{tasks: tasks, access: access, teams: teams, history: history, tx: tx, cache: cache}
+	return &Usecase{tasks: tasks, access: access, teams: teams, history: history, tx: tx, cache: cache, now: now}
 }
 
 // Handle updates a task on behalf of a team member and records every field
@@ -127,7 +130,7 @@ func (u *Usecase) applyChanges(ctx context.Context, current domain.Task, in Inpu
 		if err != nil {
 			return domain.Task{}, fmt.Errorf("validating status: %w", err)
 		}
-		updated.Status = status
+		updated.ChangeStatus(status, u.now())
 	}
 	if in.SetAssignee {
 		if in.AssigneeID != nil && !sameAssignee(current.AssigneeID, in.AssigneeID) {

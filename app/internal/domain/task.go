@@ -42,6 +42,22 @@ type Task struct {
 	CreatedBy   int64
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// CompletedAt is set while the task is done and nil otherwise. It is
+	// derived from status transitions (not audited separately) so analytics
+	// count real completions instead of any row update.
+	CompletedAt *time.Time
+}
+
+// ChangeStatus transitions the status, stamping CompletedAt on the move into
+// done and clearing it when the task leaves done.
+func (t *Task) ChangeStatus(status TaskStatus, now time.Time) {
+	switch {
+	case status == TaskStatusDone && t.Status != TaskStatusDone:
+		t.CompletedAt = &now
+	case status != TaskStatusDone:
+		t.CompletedAt = nil
+	}
+	t.Status = status
 }
 
 // ValidateNewTask checks the invariants for a new task.

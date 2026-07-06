@@ -12,7 +12,7 @@ import (
 	"team-taskflow/internal/domain"
 )
 
-const taskColumns = "id, team_id, title, description, status, assignee_id, created_by, created_at, updated_at"
+const taskColumns = "id, team_id, title, description, status, assignee_id, completed_at, created_by, created_at, updated_at"
 
 type Repository struct {
 	pool   *sql.DB
@@ -73,8 +73,9 @@ func (r *Repository) Update(ctx context.Context, task domain.Task) error {
 	executor := r.getter.DefaultTrOrDB(ctx, r.pool)
 
 	result, err := executor.ExecContext(ctx,
-		`UPDATE tasks SET title = ?, description = ?, status = ?, assignee_id = ? WHERE id = ?`,
-		task.Title, task.Description, string(task.Status), assigneeParam(task.AssigneeID), task.ID,
+		`UPDATE tasks SET title = ?, description = ?, status = ?, assignee_id = ?, completed_at = ? WHERE id = ?`,
+		task.Title, task.Description, string(task.Status),
+		assigneeParam(task.AssigneeID), nullTimeParam(task.CompletedAt), task.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating task id=%d: %w", task.ID, err)

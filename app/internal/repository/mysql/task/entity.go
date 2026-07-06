@@ -14,6 +14,7 @@ type taskEntity struct {
 	Description string        `db:"description"`
 	Status      string        `db:"status"`
 	AssigneeID  sql.NullInt64 `db:"assignee_id"`
+	CompletedAt sql.NullTime  `db:"completed_at"`
 	CreatedBy   int64         `db:"created_by"`
 	CreatedAt   time.Time     `db:"created_at"`
 	UpdatedAt   time.Time     `db:"updated_at"`
@@ -33,6 +34,9 @@ func (e taskEntity) toDomain() domain.Task {
 	if e.AssigneeID.Valid {
 		task.AssigneeID = &e.AssigneeID.Int64
 	}
+	if e.CompletedAt.Valid {
+		task.CompletedAt = &e.CompletedAt.Time
+	}
 	return task
 }
 
@@ -41,7 +45,7 @@ func (e taskEntity) toDomain() domain.Task {
 func scanTask(scan func(dest ...any) error) (taskEntity, error) {
 	var e taskEntity
 	err := scan(&e.ID, &e.TeamID, &e.Title, &e.Description, &e.Status,
-		&e.AssigneeID, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt)
+		&e.AssigneeID, &e.CompletedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt)
 	return e, err
 }
 
@@ -50,4 +54,11 @@ func assigneeParam(id *int64) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: *id, Valid: true}
+}
+
+func nullTimeParam(t *time.Time) sql.NullTime {
+	if t == nil {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: *t, Valid: true}
 }

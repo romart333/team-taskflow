@@ -29,15 +29,16 @@ func NewCache(client *redis.Client, ttl time.Duration) *Cache {
 }
 
 type cachedTask struct {
-	ID          int64     `json:"id"`
-	TeamID      int64     `json:"team_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	AssigneeID  *int64    `json:"assignee_id,omitempty"`
-	CreatedBy   int64     `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          int64      `json:"id"`
+	TeamID      int64      `json:"team_id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Status      string     `json:"status"`
+	AssigneeID  *int64     `json:"assignee_id,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	CreatedBy   int64      `json:"created_by"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type cachedPage struct {
@@ -128,6 +129,7 @@ func toCached(page domain.TaskPage) cachedPage {
 			Description: task.Description,
 			Status:      string(task.Status),
 			AssigneeID:  task.AssigneeID,
+			CompletedAt: task.CompletedAt,
 			CreatedBy:   task.CreatedBy,
 			CreatedAt:   task.CreatedAt,
 			UpdatedAt:   task.UpdatedAt,
@@ -146,6 +148,7 @@ func (p cachedPage) toDomain() domain.TaskPage {
 			Description: task.Description,
 			Status:      domain.TaskStatus(task.Status),
 			AssigneeID:  task.AssigneeID,
+			CompletedAt: task.CompletedAt,
 			CreatedBy:   task.CreatedBy,
 			CreatedAt:   task.CreatedAt,
 			UpdatedAt:   task.UpdatedAt,

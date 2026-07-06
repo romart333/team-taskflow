@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	trmsql "github.com/avito-tech/go-transaction-manager/drivers/sql/v2"
 	"github.com/avito-tech/go-transaction-manager/trm/v2/manager"
@@ -117,7 +118,7 @@ func TestTaskRepositoryListFilters(t *testing.T) {
 		if status != domain.TaskStatusTodo {
 			task, err := tasks.GetByID(ctx, id)
 			require.NoError(t, err)
-			task.Status = status
+			task.ChangeStatus(status, time.Now())
 			require.NoError(t, tasks.Update(ctx, task))
 		}
 		return id

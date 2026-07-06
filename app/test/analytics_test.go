@@ -5,6 +5,7 @@ package test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,7 +35,7 @@ func TestAnalyticsQueries(t *testing.T) {
 	require.NoError(t, err)
 	doneTask, err := tasks.GetByID(ctx, doneID)
 	require.NoError(t, err)
-	doneTask.Status = domain.TaskStatusDone
+	doneTask.ChangeStatus(domain.TaskStatusDone, time.Now())
 	require.NoError(t, tasks.Update(ctx, doneTask))
 
 	_, err = tasks.Create(ctx, domain.Task{
@@ -61,6 +62,27 @@ func TestAnalyticsQueries(t *testing.T) {
 		require.NotNil(t, found, "team must be present in stats")
 		assert.EqualValues(t, 2, found.MemberCount)
 		assert.EqualValues(t, 1, found.DoneTasksInWindow)
+	})
+
+	t.Run("editing an old done task does not re-count it as recently done", func(t *testing.T) {
+		// Simulate a task completed long before the reporting window.
+		_, err := pool.ExecContext(ctx,
+			`UPDATE tasks SET completed_at = NOW() - INTERVAL 60 DAY WHERE id = ?`, doneID)
+		require.NoError(t, err)
+
+		edited, err := tasks.GetByID(ctx, doneID)
+		require.NoError(t, err)
+		edited.Title = "done-task-edited"
+		require.NoError(t, tasks.Update(ctx, edited))
+
+		stats, err := analytics.TeamStats(ctx, ownerID, domain.TeamStatsDoneWindowDays)
+		require.NoError(t, err)
+		for _, s := range stats {
+			if s.TeamID == teamID {
+				assert.Zero(t, s.DoneTasksInWindow,
+					"title edit bumps updated_at but must not affect completion stats")
+			}
+		}
 	})
 
 	t.Run("analytics are hidden from non-members", func(t *testing.T) {

@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"team-taskflow/internal/domain"
 )
+
+var fixedNow = time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
 
 type taskRepoMock struct {
 	task      domain.Task
@@ -110,7 +113,7 @@ func newFixture(task domain.Task) *fixture {
 }
 
 func (f *fixture) usecase() *Usecase {
-	return New(f.tasks, f.access, f.teams, f.history, f.tx, f.cache)
+	return New(f.tasks, f.access, f.teams, f.history, f.tx, f.cache, func() time.Time { return fixedNow })
 }
 
 func TestUsecase_Handle(t *testing.T) {
@@ -131,6 +134,8 @@ func TestUsecase_Handle(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "New title", out.Task.Title)
 		assert.Equal(t, domain.TaskStatusDone, out.Task.Status)
+		require.NotNil(t, out.Task.CompletedAt, "completion must be stamped on the move into done")
+		assert.Equal(t, fixedNow, *out.Task.CompletedAt)
 		assert.Equal(t, 1, f.tx.calls)
 		assert.Equal(t, 1, f.tasks.lockCalls, "snapshot must be read with a row lock")
 		assert.Equal(t, 1, f.cache.calls)

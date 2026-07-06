@@ -2,10 +2,44 @@ package domain
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTask_ChangeStatus(t *testing.T) {
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	earlier := now.Add(-time.Hour)
+
+	t.Run("entering done stamps completion time", func(t *testing.T) {
+		task := Task{Status: TaskStatusTodo}
+
+		task.ChangeStatus(TaskStatusDone, now)
+
+		assert.Equal(t, TaskStatusDone, task.Status)
+		require.NotNil(t, task.CompletedAt)
+		assert.Equal(t, now, *task.CompletedAt)
+	})
+
+	t.Run("leaving done clears completion time", func(t *testing.T) {
+		task := Task{Status: TaskStatusDone, CompletedAt: &earlier}
+
+		task.ChangeStatus(TaskStatusInProgress, now)
+
+		assert.Equal(t, TaskStatusInProgress, task.Status)
+		assert.Nil(t, task.CompletedAt)
+	})
+
+	t.Run("staying done keeps the original stamp", func(t *testing.T) {
+		task := Task{Status: TaskStatusDone, CompletedAt: &earlier}
+
+		task.ChangeStatus(TaskStatusDone, now)
+
+		require.NotNil(t, task.CompletedAt)
+		assert.Equal(t, earlier, *task.CompletedAt)
+	})
+}
 
 func TestTask_Diff(t *testing.T) {
 	assignee := int64(7)
