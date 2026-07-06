@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"team-taskflow/internal/domain"
 )
@@ -46,7 +45,11 @@ func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
 		return Output{}, fmt.Errorf("getting team: %w", err)
 	}
 
-	email := strings.ToLower(strings.TrimSpace(in.Email))
+	email, err := domain.NormalizeEmail(in.Email)
+	if err != nil {
+		return Output{}, fmt.Errorf("normalizing invitee email: %w", err)
+	}
+
 	invitee, err := u.users.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {

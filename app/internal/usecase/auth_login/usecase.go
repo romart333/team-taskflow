@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"team-taskflow/internal/domain"
 )
@@ -21,7 +20,12 @@ func New(users UserRepository, verifier PasswordVerifier, tokens TokenIssuer) *U
 }
 
 func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
-	email := strings.ToLower(strings.TrimSpace(in.Email))
+	email, err := domain.NormalizeEmail(in.Email)
+	if err != nil {
+		// Deliberately indistinguishable from unknown credentials: no account
+		// can exist under a non-normalizable email.
+		return Output{}, fmt.Errorf("normalizing email: %w", domain.ErrUnauthorized)
+	}
 
 	user, err := u.users.GetByEmail(ctx, email)
 	if err != nil {

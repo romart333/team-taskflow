@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"team-taskflow/internal/domain"
 )
@@ -19,9 +18,12 @@ func New(users UserRepository, hasher PasswordHasher) *Usecase {
 }
 
 func (u *Usecase) Handle(ctx context.Context, in Input) (Output, error) {
-	email := strings.ToLower(strings.TrimSpace(in.Email))
+	email, err := domain.NormalizeEmail(in.Email)
+	if err != nil {
+		return Output{}, fmt.Errorf("normalizing email: %w", err)
+	}
 
-	if err := domain.ValidateRegistration(email, in.Password, in.Name); err != nil {
+	if err := domain.ValidateRegistration(in.Password, in.Name); err != nil {
 		return Output{}, fmt.Errorf("validating registration: %w", err)
 	}
 

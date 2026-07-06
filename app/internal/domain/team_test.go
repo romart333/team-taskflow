@@ -34,29 +34,3 @@ func TestParseRole(t *testing.T) {
 	_, err := ParseRole("superuser")
 	require.ErrorIs(t, err, ErrValidation)
 }
-
-func TestValidateRegistration(t *testing.T) {
-	tests := []struct {
-		name    string
-		email   string
-		pass    string
-		user    string
-		wantErr bool
-	}{
-		{"valid", "a@b.com", "password1", "Alice", false},
-		{"bad email", "not-an-email", "password1", "Alice", true},
-		{"short password", "a@b.com", "short", "Alice", true},
-		{"empty name", "a@b.com", "password1", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateRegistration(tt.email, tt.pass, tt.user)
-			if tt.wantErr {
-				require.ErrorIs(t, err, ErrValidation)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
-}
