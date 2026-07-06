@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -113,4 +114,6 @@ func TestParseTaskStatus(t *testing.T) {
 func TestValidateNewTask(t *testing.T) {
 	assert.NoError(t, ValidateNewTask("title"))
 	assert.ErrorIs(t, ValidateNewTask(""), ErrValidation)
+	assert.NoError(t, ValidateNewTask(strings.Repeat("t", MaxTaskTitleLength)))
+	assert.ErrorIs(t, ValidateNewTask(strings.Repeat("t", MaxTaskTitleLength+1)), ErrValidation)
 }

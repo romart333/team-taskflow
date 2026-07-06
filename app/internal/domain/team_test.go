@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,13 @@ func TestRole_CanInvite(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.role.CanInvite())
 		})
 	}
+}
+
+func TestValidateTeamName(t *testing.T) {
+	assert.NoError(t, ValidateTeamName("Platform"))
+	assert.ErrorIs(t, ValidateTeamName(""), ErrValidation)
+	assert.NoError(t, ValidateTeamName(strings.Repeat("n", MaxTeamNameLength)))
+	assert.ErrorIs(t, ValidateTeamName(strings.Repeat("n", MaxTeamNameLength+1)), ErrValidation)
 }
 
 func TestParseRole(t *testing.T) {

@@ -1,8 +1,10 @@
 package domain
 
 import (
+	"fmt"
 	"strconv"
 	"time"
+	"unicode/utf8"
 )
 
 // TaskStatus is the workflow state of a task.
@@ -60,10 +62,16 @@ func (t *Task) ChangeStatus(status TaskStatus, now time.Time) {
 	t.Status = status
 }
 
+// MaxTaskTitleLength mirrors the tasks.title VARCHAR(500) column.
+const MaxTaskTitleLength = 500
+
 // ValidateNewTask checks the invariants for a new task.
 func ValidateNewTask(title string) error {
 	if title == "" {
 		return NewValidationError("task title is required")
+	}
+	if utf8.RuneCountInString(title) > MaxTaskTitleLength {
+		return NewValidationError(fmt.Sprintf("task title must be at most %d characters", MaxTaskTitleLength))
 	}
 	return nil
 }

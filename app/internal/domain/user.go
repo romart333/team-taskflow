@@ -11,8 +11,13 @@ import (
 const (
 	// MinPasswordLength is the domain rule for the shortest acceptable password.
 	MinPasswordLength = 8
+	// MaxPasswordLength mirrors bcrypt's 72-byte input limit; anything longer
+	// would fail inside the hasher with an opaque internal error.
+	MaxPasswordLength = 72
 	// MaxEmailLength mirrors the users.email VARCHAR(255) column.
 	MaxEmailLength = 255
+	// MaxUserNameLength mirrors the users.name VARCHAR(255) column.
+	MaxUserNameLength = 255
 )
 
 type User struct {
@@ -47,8 +52,14 @@ func ValidateRegistration(password, name string) error {
 	if len(password) < MinPasswordLength {
 		return NewValidationError(fmt.Sprintf("password must be at least %d characters", MinPasswordLength))
 	}
+	if len(password) > MaxPasswordLength {
+		return NewValidationError(fmt.Sprintf("password must be at most %d characters", MaxPasswordLength))
+	}
 	if name == "" {
 		return NewValidationError("name is required")
+	}
+	if utf8.RuneCountInString(name) > MaxUserNameLength {
+		return NewValidationError(fmt.Sprintf("name must be at most %d characters", MaxUserNameLength))
 	}
 	return nil
 }

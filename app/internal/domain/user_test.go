@@ -40,4 +40,14 @@ func TestValidateRegistration(t *testing.T) {
 	assert.NoError(t, ValidateRegistration("password8", "Alice"))
 	assert.ErrorIs(t, ValidateRegistration("short", "Alice"), ErrValidation)
 	assert.ErrorIs(t, ValidateRegistration("password8", ""), ErrValidation)
+
+	t.Run("password length is capped by the bcrypt input limit", func(t *testing.T) {
+		assert.NoError(t, ValidateRegistration(strings.Repeat("p", MaxPasswordLength), "Alice"))
+		assert.ErrorIs(t, ValidateRegistration(strings.Repeat("p", MaxPasswordLength+1), "Alice"), ErrValidation)
+	})
+
+	t.Run("name length is capped by the column limit", func(t *testing.T) {
+		assert.NoError(t, ValidateRegistration("password8", strings.Repeat("n", MaxUserNameLength)))
+		assert.ErrorIs(t, ValidateRegistration("password8", strings.Repeat("n", MaxUserNameLength+1)), ErrValidation)
+	})
 }

@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"time"
+	"unicode/utf8"
+)
 
 // Role is a member's role inside a team.
 type Role string
@@ -33,10 +37,16 @@ type Team struct {
 	CreatedAt time.Time
 }
 
+// MaxTeamNameLength mirrors the teams.name VARCHAR(255) column.
+const MaxTeamNameLength = 255
+
 // ValidateTeamName checks the invariants for a new team.
 func ValidateTeamName(name string) error {
 	if name == "" {
 		return NewValidationError("team name is required")
+	}
+	if utf8.RuneCountInString(name) > MaxTeamNameLength {
+		return NewValidationError(fmt.Sprintf("team name must be at most %d characters", MaxTeamNameLength))
 	}
 	return nil
 }
